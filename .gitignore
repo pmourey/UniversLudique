@@ -1,0 +1,28 @@
+# macOS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Node / Vite
+node_modules/
+dist/
+build/
+.cache/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env/Secrets
+.env
+.env.*
+!.env.example
+frontend/.env.local
+
+# PHP / Composer
+vendor/
+composer.lock
+
+# Coverage / misc
+coverage/

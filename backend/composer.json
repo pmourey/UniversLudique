@@ -1,0 +1,19 @@
+{
+    "require": {
+        "php": ">=8.0",
+        "cboden/ratchet": "^0.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Tarot\\": "src/"
+        }
+    },
+    "scripts": {
+        "serve": "php bin/server.php"
+    },
+    "config": {
+        "platform": {
+            "php": "8.0.0"
+        }
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "tarot",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:preview": "npm --prefix frontend run preview",
+    "frontend:ws:test": "npm --prefix frontend run ws:test",
+    "frontend:ws:sim3": "npm --prefix frontend run ws:sim3",
+    "backend:serve": "php backend/bin/server.php",
+    "backend:serve:8090": "HOST=127.0.0.1 PORT=8090 php backend/bin/server.php"
+  }
+}
+
