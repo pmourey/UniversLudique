@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "ws:test": "node scripts/ws-test.js",
-    "ws:sim3": "node scripts/ws-simulate-3.js"
+    "ws:sim3": "node scripts/ws-simulate-3.js",
+    "ws:simfull": "node scripts/ws-simulate-full.js"
   },
   "dependencies": {
     "react": "^19.1.1",

@@ -25,6 +25,8 @@ class Room
     private $trick = array(); // array of [playerId, card]
     private $leaderId = null; // who leads current trick
     private $won = array(); // id => array of won cards
+    // Nouveau: nombre de plis gagnés par joueur
+    private $tricksWon = array(); // id => int
 
     public function __construct($id)
     {
@@ -66,6 +68,7 @@ class Room
             unset($this->hands[$info['id']]);
             unset($this->bids[$info['id']]);
             unset($this->won[$info['id']]);
+            unset($this->tricksWon[$info['id']]);
 
             $this->broadcast(array(
                 'type' => 'player_left',
@@ -174,6 +177,22 @@ class Room
                 $this->handlePlayCard($pid, $card);
                 break;
 
+            case 'restart':
+                // Permettre de relancer une donne (rotation de donneur conservée par startGame)
+                if (count($this->seats) < 3) return;
+                $this->resetGame();
+                $this->broadcast(array('type' => 'notice', 'payload' => array('message' => 'Nouvelle donne…')));
+                $this->startGame();
+                break;
+
+            case 'finish':
+                // Force la fin si condition atteinte (mains vides / pli partiel)
+                $done = $this->checkAndFinishIfOver();
+                if (!$done) {
+                    $this->broadcast(array('type' => 'notice', 'payload' => array('message' => "Impossible de terminer: donne non terminée.")));
+                }
+                break;
+
             default:
                 $this->broadcast(array( 'type' => 'notice', 'payload' => array( 'message' => 'Action inconnue: ' . $action ) ));
         }
@@ -193,6 +212,7 @@ class Room
         $this->trick = array();
         $this->leaderId = null;
         $this->won = array();
+        $this->tricksWon = array();
     }
 
     private function setupNewDeal()
@@ -205,24 +225,29 @@ class Room
         $this->highestBid = null;
         $this->trick = array();
         $this->won = array();
+        $this->tricksWon = array();
 
         $deck = $this->generateDeck();
         shuffle($deck);
 
-        $n = count($this->seats);
+        // Recalculer l'ordre actuel des joueurs
+        $this->rebuildOrder();
+        $n = count($this->order);
+        if ($n < 3) { throw new \RuntimeException('Au moins 3 joueurs requis'); }
+
+        // dog (taille en fonction du nombre de joueurs)
         $dogSize = $this->dogSizeFor($n);
-        // dog
         for ($i=0; $i<$dogSize; $i++) {
             $this->dog[] = array_pop($deck);
         }
+
         // determine first bidder: next after dealer
-        $this->rebuildOrder();
         $idxDealer = $this->indexOf($this->order, $this->dealerId);
         $this->currentTurnIndex = ($idxDealer + 1) % $n;
 
         // deal remaining evenly
         $this->hands = array();
-        foreach ($this->order as $pid) { $this->hands[$pid] = array(); $this->won[$pid] = array(); }
+        foreach ($this->order as $pid) { $this->hands[$pid] = array(); $this->won[$pid] = array(); $this->tricksWon[$pid] = 0; }
         $i = 0;
         while (!empty($deck)) {
             $pid = $this->order[$i % $n];
@@ -267,7 +292,9 @@ class Room
             if ($this->highestBid === null || $this->takerId === null) {
                 echo "[ROOM {$this->id}] bidding end: all pass -> redeal\n";
                 $this->broadcast(array('type' => 'notice', 'payload' => array('message' => 'Tous passent, nouvelle donne.')));
-                $this->startGame(); // relancer une donne
+                // Correction: reset puis relancer une donne
+                $this->resetGame();
+                $this->startGame();
                 return;
             }
             if ($this->highestBid === 'prise' || $this->highestBid === 'garde') {
@@ -331,7 +358,7 @@ class Room
             array_splice($hand, $idx, 1);
         }
         $this->hands[$pid] = $hand;
-        // dog becomes discarded pile (ignored in scoring here)
+        // dog devient l'écart (ignoré pour le score ici)
         $this->dog = array();
         $this->status = 'playing';
         $this->leaderId = $this->takerId;
@@ -357,43 +384,145 @@ class Room
         // advance turn
         $this->currentTurnIndex = ($this->currentTurnIndex + 1) % count($this->order);
 
+        $nPlayers = count($this->order);
+        $trickComplete = (count($this->trick) === $nPlayers);
+
         // if trick complete
-        if (count($this->trick) === count($this->order)) {
-            // Simplified: first card wins
-            $winnerId = $this->trick[0]['playerId'];
-            foreach ($this->trick as $entry) { $this->won[$winnerId][] = $entry['card']; }
+        if ($trickComplete) {
+            $winnerId = $this->determineTrickWinner($this->trick);
+            foreach ($this->trick as $entry) {
+                $this->won[$winnerId][] = $entry['card'];
+            }
+            if (!isset($this->tricksWon[$winnerId])) { $this->tricksWon[$winnerId] = 0; }
+            $this->tricksWon[$winnerId]++;
+
             $this->trick = array();
             $this->leaderId = $winnerId;
             $this->currentTurnIndex = $this->indexOf($this->order, $winnerId);
             echo "[ROOM {$this->id}] trick complete winner={$winnerId} nextLeader={$this->leaderId}\n";
+        }
 
-            // end of play when all hands empty
-            $empty = true;
-            foreach ($this->hands as $h) { if (!empty($h)) { $empty = false; break; } }
-            if ($empty) {
-                $this->status = 'scoring';
-                echo "[ROOM {$this->id}] all hands empty -> scoring\n";
-                $this->computeScore();
-            }
+        // Vérifier et terminer si la donne est finie
+        if ($this->checkAndFinishIfOver()) {
+            $this->broadcastState();
+            $this->sendPrivateStates();
+            return;
         }
 
         $this->broadcastState();
         $this->sendPrivateStates();
     }
 
+    private function checkAndFinishIfOver()
+    {
+        if ($this->status !== 'playing') return false;
+        $empty = true;
+        foreach ($this->hands as $h) { if (!empty($h)) { $empty = false; break; } }
+        if (!$empty) return false;
+
+        // Si un pli est en cours mais non complet, l'attribuer quand même
+        if (count($this->trick) > 0) {
+            $winnerId = $this->determineTrickWinner($this->trick);
+            foreach ($this->trick as $entry) { $this->won[$winnerId][] = $entry['card']; }
+            if (!isset($this->tricksWon[$winnerId])) { $this->tricksWon[$winnerId] = 0; }
+            $this->tricksWon[$winnerId]++;
+            $this->trick = array();
+            $this->leaderId = $winnerId;
+            $this->currentTurnIndex = $this->indexOf($this->order, $winnerId);
+            echo "[ROOM {$this->id}] end-of-hand partial trick assigned to winner={$winnerId}\n";
+        }
+        $this->status = 'scoring';
+        echo "[ROOM {$this->id}] all hands empty -> scoring\n";
+        $this->computeScore();
+        return true;
+    }
+
     private function computeScore()
     {
-        // Simplified scoring: taker wins if he has strictly more won cards than any opponent (very rough placeholder)
         $takerWon = isset($this->won[$this->takerId]) ? count($this->won[$this->takerId]) : 0;
         $maxDef = 0;
+        $defenders = array();
         foreach ($this->won as $pid => $cards) {
             if ($pid === $this->takerId) continue;
+            $defenders[] = $pid;
             if (count($cards) > $maxDef) $maxDef = count($cards);
         }
         $result = ($takerWon > $maxDef) ? 'taker_wins' : 'defense_wins';
         echo "[ROOM {$this->id}] scoring result={$result} takerWon={$takerWon} maxDef={$maxDef}\n";
-        $this->broadcast(array('type' => 'notice', 'payload' => array('message' => 'Résultat (proto): ' . $result)));
+        // Construire un message clair avec gagnant(s)
+        $winners = ($result === 'taker_wins') ? array($this->takerId) : $defenders;
+        $winnersNames = array_map(function($id){ return $this->playerNameById($id); }, $winners);
+        $msg = 'Fin de partie — Gagnant(s): ' . implode(', ', $winnersNames);
+        $this->broadcast(array('type' => 'notice', 'payload' => array('message' => $msg)));
         $this->status = 'finished';
+        // Émettre un événement dédié de fin de partie avec gagnant(s)
+        $payload = array(
+            'result' => $result,
+            'takerId' => $this->takerId,
+            'winners' => $winners,
+            'winnersNames' => $winnersNames,
+            'wonCounts' => $this->wonCounts(),
+        );
+        $this->broadcast(array('type' => 'game_over', 'payload' => $payload));
+        $this->broadcastState();
+    }
+
+    private function wonCounts()
+    {
+        $out = array();
+        foreach ($this->won as $pid => $cards) { $out[$pid] = count($cards); }
+        return $out;
+    }
+
+    // Détermination du gagnant du pli (simplifiée):
+    // - Si au moins un atout (T1..T21) a été joué, l'atout le plus fort gagne (EXCUSE ignorée)
+    // - Sinon, carte la plus forte de la couleur demandée (1..14, 14 le plus fort)
+    // - EXCUSE ne peut pas gagner un pli ici (règle simplifiée)
+    private function determineTrickWinner(array $trick)
+    {
+        if (empty($trick)) return $this->leaderId ?: $this->order[0];
+        $leadCard = $trick[0]['card'];
+        $leadInfo = $this->cardInfo($leadCard);
+        $best = $trick[0];
+        $bestInfo = $leadInfo;
+
+        // Chercher trumps
+        $hasTrump = false; $bestTrump = null; $bestTrumpVal = -1;
+        foreach ($trick as $entry) {
+            $info = $this->cardInfo($entry['card']);
+            if ($info['isExcuse']) continue;
+            if ($info['isTrump']) {
+                $hasTrump = true;
+                if ($info['rank'] > $bestTrumpVal) { $bestTrumpVal = $info['rank']; $bestTrump = $entry; }
+            }
+        }
+        if ($hasTrump && $bestTrump !== null) {
+            return $bestTrump['playerId'];
+        }
+
+        // Sinon, comparer au sein de la couleur demandée
+        $bestSuitVal = $leadInfo['rank'];
+        foreach ($trick as $entry) {
+            $info = $this->cardInfo($entry['card']);
+            if ($info['isExcuse'] || $info['isTrump']) continue;
+            if ($info['suit'] === $leadInfo['suit']) {
+                if ($info['rank'] > $bestSuitVal) { $bestSuitVal = $info['rank']; $best = $entry; }
+            }
+        }
+        return $best['playerId'];
+    }
+
+    private function cardInfo($card)
+    {
+        if ($card === 'EXCUSE') return array('isTrump' => false, 'isExcuse' => true, 'suit' => null, 'rank' => 0);
+        if (strlen($card) >= 2 && $card[0] === 'T') {
+            $rank = (int)substr($card, 1);
+            return array('isTrump' => true, 'isExcuse' => false, 'suit' => null, 'rank' => $rank);
+        }
+        // Suits S/H/D/C + numeric rank
+        $suit = $card[0];
+        $rank = (int)substr($card, 1);
+        return array('isTrump' => false, 'isExcuse' => false, 'suit' => $suit, 'rank' => $rank);
     }
 
     private function publicPlayers()
@@ -407,6 +536,7 @@ class Room
                 'seat' => isset($p['seat']) ? $p['seat'] : null,
                 'handCount' => isset($this->hands[$p['id']]) ? count($this->hands[$p['id']]) : 0,
                 'wonCount' => isset($this->won[$p['id']]) ? count($this->won[$p['id']]) : 0,
+                'tricksWon' => isset($this->tricksWon[$p['id']]) ? (int)$this->tricksWon[$p['id']] : 0,
             );
         }
         // sort by seat
@@ -437,6 +567,8 @@ class Room
 
     private function currentPlayerId()
     {
+        // Hors phases actives, personne n'est attendu à jouer
+        if (!in_array($this->status, array('bidding','discarding','playing'), true)) return null;
         if (empty($this->order)) return null;
         return $this->order[$this->currentTurnIndex];
     }
@@ -454,5 +586,14 @@ class Room
         foreach ($this->players as $conn) { $tmp[] = $this->players[$conn]; }
         usort($tmp, function($a,$b){ return ($a['seat'] - $b['seat']); });
         $this->order = array_map(function($p){ return $p['id']; }, $tmp);
+    }
+
+    private function playerNameById($id)
+    {
+        foreach ($this->players as $conn) {
+            $p = $this->players[$conn];
+            if ($p['id'] === $id) return $p['name'];
+        }
+        return (string)$id;
     }
 }

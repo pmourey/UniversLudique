@@ -48,6 +48,7 @@ Navigateur (React UI)
 - Salons: création, rejoindre/quitter, chat.
 - Machine à états (proto): waiting → bidding (enchères) → discarding (écart) → playing (plis) → scoring → finished.
 - Logs serveur: `[WS] OPEN/RECV/CLOSE/ERROR` et `[ROOM …] startGame/bid/discard/play/scoring`.
+- UI: indicateur de tour, affichage des plis gagnés (tricksWon), bouton “Relancer la donne” en fin de partie et “Terminer la donne” si bloqué.
 
 ## Prérequis
 - PHP ≥ 8.1 (CLI) + Composer
@@ -111,6 +112,7 @@ npm run frontend:build      # Build
 npm run frontend:preview    # Preview du build
 npm run frontend:ws:test    # Bot simple: welcome/register/create_room/chat/rooms
 npm run frontend:ws:sim3    # Simulation 3 joueurs: enchères/écart/1 pli
+npm run frontend:ws:simfull # Simulation 3 joueurs: donne complète → game_over
 
 # Backend
 npm run backend:serve       # php backend/bin/server.php
@@ -123,11 +125,16 @@ Format: `{ type: string, payload?: object }`
   - `create_room`, `join_room { roomId }`, `leave_room`, `list_rooms`
   - `chat { text }`
   - `start_game`
-  - `action { action: 'bid'|'discard'|'play_card', params: {...} }`
+  - `action { action: 'bid'|'discard'|'play_card'|'restart'|'finish', params?: {...} }`
 - Serveur → Client:
   - `welcome { connectionId }`, `registered { name }`
   - `room_joined`, `room_update`, `state`, `your_hand { hand, isYourTurn, youAreTaker }`
   - `rooms`, `chat`, `error`, `notice`
+  - `game_over { result, takerId, winners, winnersNames, wonCounts }`
+
+État `state` expose aussi:
+- `players[]` avec `handCount`, `wonCount` (cartes ramassées) et `tricksWon` (plis gagnés).
+- `currentPlayerId` nul hors phases actives.
 
 ## Règles du Tarot (résumé)
 - Joueurs: 3 à 5. Paquet: 78 cartes (4 couleurs 1..14, atouts T1..T21, Excuse).

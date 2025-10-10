@@ -113,6 +113,15 @@ function App() {
       case 'chat':
         setMessages((prev) => [...prev, msg.payload])
         break
+      case 'notice':
+        setMessages((prev) => [...prev, { from: 'system', text: msg.payload?.message || '', ts: Date.now() }])
+        break
+      case 'game_over': {
+        const names = (msg.payload?.winnersNames || []).join(', ')
+        const text = names ? `Fin de partie — Gagnant(s): ${names}` : 'Fin de partie'
+        setMessages((prev) => [...prev, { from: 'system', text, ts: Date.now() }])
+        break
+      }
       case 'your_hand':
         setHand(msg.payload?.hand || [])
         setIsYourTurn(!!msg.payload?.isYourTurn)
@@ -133,6 +142,8 @@ function App() {
   const joinRoom = () => roomId.trim() && send('join_room', { roomId: roomId.trim() })
   const leaveRoom = () => send('leave_room')
   const startGame = () => send('start_game')
+  const restartDeal = () => send('action', { action: 'restart' })
+  const finishDeal = () => send('action', { action: 'finish' })
   const sendChat = () => { if (!chatInput.trim()) return; send('chat', { text: chatInput }); setChatInput('') }
 
   const placeBid = (bid) => send('action', { action: 'bid', params: { bid } })
@@ -158,6 +169,8 @@ function App() {
   }, [])
 
   const canStart = roomState?.status === 'waiting' && (roomState?.players?.length || 0) >= 3
+  const canRestart = roomState?.status === 'finished'
+  const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: 16 }}>
@@ -169,7 +182,7 @@ function App() {
         <h2>Inscription</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Votre pseudo" />
-          <button onClick={doRegister} disabled={!name || status !== 'connected'}>S\'inscrire</button>
+          <button onClick={doRegister} disabled={!name || status !== 'connected'}>S'inscrire</button>
           {registeredName && <span>Inscrit comme: <b>{registeredName}</b></span>}
         </div>
       </section>
@@ -204,12 +217,14 @@ function App() {
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) — cartes: {p.handCount} — plis: {p.wonCount} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
+                  {p.name} (#{p.id}) — cartes: {p.handCount} — plis: {p.tricksWon} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
                 </li>
               ))}
             </ul>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <button onClick={startGame} disabled={!canStart}>Démarrer la donne</button>
+              {canRestart && <button onClick={restartDeal}>Relancer la donne</button>}
+              {canForceFinish && <button onClick={finishDeal}>Terminer la donne</button>}
             </div>
             {roomState.status === 'bidding' && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
@@ -234,7 +249,7 @@ function App() {
                     <button key={c} onClick={() => toggleDiscard(c)} style={{ border: discardSel.includes(c) ? '2px solid red' : '1px solid #ccc' }}>{c}</button>
                   ))}
                 </div>
-                <button onClick={submitDiscard} disabled={discardSel.length !== discardTarget()}>Valider l\'écart</button>
+                <button onClick={submitDiscard} disabled={discardSel.length !== discardTarget()}>Valider l'écart</button>
               </div>
             )}
             {roomState.status === 'playing' && (
