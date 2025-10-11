@@ -1,6 +1,6 @@
-# Tarot multijoueur (PHP + React)
+# Plateforme Multijeux de Cartes en Temps Réel : Tarot, Belote & Texas Hold'em (Backend PHP + Frontend React)
 
-> Prototype temps réel — Backend: PHP (Ratchet WS) • Frontend: React (Vite) • WebSocket via proxy Vite (/ws)
+<!-- Vous pouvez ajouter d'autres titres ici si nécessaire -->
 
 ## Quickstart
 
