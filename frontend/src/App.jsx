@@ -22,6 +22,7 @@ function App() {
   const [isYourTurn, setIsYourTurn] = useState(false)
   const [youAreTaker, setYouAreTaker] = useState(false)
   const [discardSel, setDiscardSel] = useState([])
+  const [playable, setPlayable] = useState([]) // nouvelles cartes jouables (Belote)
 
   // Nouveau: type de jeu à créer
   const [newGame, setNewGame] = useState('tarot') // 'tarot' | 'belote' | 'holdem'
@@ -111,11 +112,14 @@ function App() {
         setRoomState(msg.payload)
         setRoomId(msg.payload?.roomId || '')
         if (msg.payload?.status !== 'discarding') setDiscardSel([])
+        // Réinitialiser 'playable' si état change
+        if (msg.payload?.status !== 'playing') setPlayable([])
         break
       case 'left_room':
         setRoomState(null)
         setHand([])
         setDiscardSel([])
+        setPlayable([])
         break
       case 'chat':
         setMessages((prev) => [...prev, msg.payload])
@@ -133,6 +137,7 @@ function App() {
         setHand(msg.payload?.hand || [])
         setIsYourTurn(!!msg.payload?.isYourTurn)
         setYouAreTaker(!!msg.payload?.youAreTaker)
+        setPlayable(msg.payload?.playable || [])
         break
       case 'error':
         alert(msg.payload?.message || 'Erreur')
@@ -151,6 +156,7 @@ function App() {
   const startGame = () => send('start_game')
   const restartDeal = () => send('action', { action: 'restart' })
   const finishDeal = () => send('action', { action: 'finish' })
+  const chooseTrump = (suit) => send('action', { action: 'choose_trump', params: { suit } })
   const sendChat = () => { if (!chatInput.trim()) return; send('chat', { text: chatInput }); setChatInput('') }
 
   const placeBid = (bid) => send('action', { action: 'bid', params: { bid } })
@@ -227,12 +233,12 @@ function App() {
         <h2>Salon courant</h2>
         {roomState ? (
           <div>
-            <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'}</p>
+            <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'} {roomState.game === 'belote' && roomState.trumpSuit ? `— Atout: ${roomState.trumpSuit}` : ''}</p>
             <p>Joueurs (ordre):</p>
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
+                  {p.name} (#{p.id}) {p.team !== undefined ? `(équipe ${p.team})` : ''} — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
                 </li>
               ))}
             </ul>
@@ -241,7 +247,7 @@ function App() {
               {canRestart && <button onClick={restartDeal}>Relancer la donne</button>}
               {canForceFinish && <button onClick={finishDeal}>Terminer la donne</button>}
             </div>
-            {/* Sections spécifiques au Tarot seulement */}
+            {/* Tarot */}
             {roomState.game === 'tarot' && roomState.status === 'bidding' && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <h3>Enchères</h3>
@@ -284,8 +290,39 @@ function App() {
                 </div>
               </div>
             )}
-            {/* Placeholder pour autres jeux */}
-            {roomState.game && roomState.game !== 'tarot' && (
+            {/* Belote */}
+            {roomState.game === 'belote' && roomState.status === 'choosing_trump' && (
+              <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+                <h3>Choix de l'atout (Belote)</h3>
+                <p>{isYourTurn ? 'À vous de choisir l\'atout' : 'En attente...'}</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {['S','H','D','C'].map(s => (
+                    <button key={s} disabled={!isYourTurn} onClick={() => chooseTrump(s)}>{s}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {roomState.game === 'belote' && roomState.status === 'playing' && (
+              <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+                <h3>Jeu des cartes (Belote) — Atout: {roomState.trumpSuit || '—'}</h3>
+                <p>{isYourTurn ? 'À vous de jouer' : 'En attente...'}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {hand.map((c) => {
+                    const canPlay = !isYourTurn ? false : (playable.length === 0 || playable.includes(c))
+                    return (
+                      <button key={c} onClick={() => isYourTurn && canPlay && playCard(c)} disabled={!canPlay}>{c}</button>
+                    )
+                  })}
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <b>Pli en cours:</b> {(roomState.trick || []).map((t, i) => (
+                    <span key={i} style={{ marginRight: 8 }}>{t.playerId}:{t.card}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Placeholder autres jeux */}
+            {roomState.game && !['tarot','belote'].includes(roomState.game) && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <i>Ce jeu n'est pas encore implémenté dans ce prototype.</i>
               </div>

@@ -113,6 +113,7 @@ npm run frontend:preview    # Preview du build
 npm run frontend:ws:test    # Bot simple: welcome/register/create_room/chat/rooms
 npm run frontend:ws:sim3    # Simulation 3 joueurs: enchères/écart/1 pli
 npm run frontend:ws:simfull # Simulation 3 joueurs: donne complète → game_over
+npm run frontend:ws:belote # Simulation 4 joueurs
 
 # Backend
 npm run backend:serve       # php backend/bin/server.php
