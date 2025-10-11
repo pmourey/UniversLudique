@@ -23,6 +23,9 @@ function App() {
   const [youAreTaker, setYouAreTaker] = useState(false)
   const [discardSel, setDiscardSel] = useState([])
 
+  // Nouveau: type de jeu à créer
+  const [newGame, setNewGame] = useState('tarot') // 'tarot' | 'belote' | 'holdem'
+
   const wsRef = useRef(null)
   const reconnectRef = useRef({ attempts: 0, timer: null })
 
@@ -76,8 +79,9 @@ function App() {
         try {
           const msg = JSON.parse(ev.data)
           handleMessage(msg)
-        } catch {}
+        } catch { /* empty */ }
       }
+        // eslint-disable-next-line no-unused-vars
     } catch (e) {
       setStatus('disconnected')
       scheduleReconnect()
@@ -140,7 +144,7 @@ function App() {
 
   // Actions jeu
   const doRegister = () => name.trim() && send('register', { name: name.trim() })
-  const createRoom = () => send('create_room')
+  const createRoom = () => send('create_room', { game: newGame })
   const listRooms = () => send('list_rooms')
   const joinRoom = () => roomId.trim() && send('join_room', { roomId: roomId.trim() })
   const leaveRoom = () => send('leave_room')
@@ -171,13 +175,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const canStart = roomState?.status === 'waiting' && (roomState?.players?.length || 0) >= 3
+  const minPlayersFor = (g) => g === 'belote' ? 4 : g === 'holdem' ? 2 : 3
+  const canStart = roomState?.status === 'waiting' && (roomState?.players?.length || 0) >= minPlayersFor(roomState?.game || 'tarot')
   const canRestart = roomState?.status === 'finished'
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: 16 }}>
-      <h1>Tarot en ligne (prototype)</h1>
+      <h1>Jeux de cartes multi-joueurs (prototype)</h1>
       <p>Status: {status} {connId ? `(id: ${connId})` : ''}</p>
       {status !== 'connected' && (<button onClick={connect}>Se connecter</button>)}
 
@@ -192,7 +197,14 @@ function App() {
 
       <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
         <h2>Salons</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+          <label>Jeu:&nbsp;
+            <select value={newGame} onChange={(e) => setNewGame(e.target.value)}>
+              <option value="tarot">Tarot</option>
+              <option value="belote">Belote</option>
+              <option value="holdem">Texas Hold'em</option>
+            </select>
+          </label>
           <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
           <button onClick={listRooms} disabled={status !== 'connected'}>Lister les salons</button>
           <input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ID du salon" />
@@ -204,7 +216,7 @@ function App() {
             {rooms.map(r => (
               <li key={r.roomId}>
                 <button onClick={() => setRoomId(r.roomId)}>Choisir</button>
-                &nbsp;Salon {r.roomId} — joueurs: {r.players} — statut: {r.status}
+                &nbsp;Salon {r.roomId} — jeu: {r.game || 'tarot'} — joueurs: {r.players} — statut: {r.status}
               </li>
             ))}
           </ul>
@@ -215,12 +227,12 @@ function App() {
         <h2>Salon courant</h2>
         {roomState ? (
           <div>
-            <p>Salon: <b>{roomState.roomId}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'}</p>
+            <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'}</p>
             <p>Joueurs (ordre):</p>
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) — cartes: {p.handCount} — plis: {p.tricksWon} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
+                  {p.name} (#{p.id}) — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
                 </li>
               ))}
             </ul>
@@ -229,7 +241,8 @@ function App() {
               {canRestart && <button onClick={restartDeal}>Relancer la donne</button>}
               {canForceFinish && <button onClick={finishDeal}>Terminer la donne</button>}
             </div>
-            {roomState.status === 'bidding' && (
+            {/* Sections spécifiques au Tarot seulement */}
+            {roomState.game === 'tarot' && roomState.status === 'bidding' && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <h3>Enchères</h3>
                 <p>{isYourTurn ? 'À vous de parler.' : 'En attente...'}</p>
@@ -243,7 +256,7 @@ function App() {
                 <p>Meilleure enchère: <b>{roomState.highestBid || '—'}</b> — Preneur: {roomState.takerId ?? '—'}</p>
               </div>
             )}
-            {roomState.status === 'discarding' && youAreTaker && (
+            {roomState.game === 'tarot' && roomState.status === 'discarding' && youAreTaker && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <h3>Écart</h3>
                 <p>Sélectionnez {discardTarget()} cartes à écarter</p>
@@ -255,7 +268,7 @@ function App() {
                 <button onClick={submitDiscard} disabled={discardSel.length !== discardTarget()}>Valider l'écart</button>
               </div>
             )}
-            {roomState.status === 'playing' && (
+            {roomState.game === 'tarot' && roomState.status === 'playing' && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <h3>Jeu des cartes</h3>
                 <p>{isYourTurn ? 'À vous de jouer' : 'En attente...'}</p>
@@ -269,6 +282,12 @@ function App() {
                     <span key={i} style={{ marginRight: 8 }}>{t.playerId}:{t.card}</span>
                   ))}
                 </div>
+              </div>
+            )}
+            {/* Placeholder pour autres jeux */}
+            {roomState.game && roomState.game !== 'tarot' && (
+              <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+                <i>Ce jeu n'est pas encore implémenté dans ce prototype.</i>
               </div>
             )}
           </div>

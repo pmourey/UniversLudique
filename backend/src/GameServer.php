@@ -58,6 +58,8 @@ class GameServer implements MessageComponentInterface
             $info = ' roomId=' . (isset($payload['roomId']) ? (string)$payload['roomId'] : '');
         } elseif ($type === 'start_game') {
             $info = ' start';
+        } elseif ($type === 'create_room') {
+            $info = ' game=' . (isset($payload['game']) ? (string)$payload['game'] : 'tarot');
         }
         echo "[WS] RECV #{$cid} type={$type}{$info}\n";
 
@@ -75,7 +77,8 @@ class GameServer implements MessageComponentInterface
 
                 case 'create_room':
                     $roomId = $this->createRoomId();
-                    $room = new Room($roomId);
+                    $game = isset($payload['game']) ? (string)$payload['game'] : 'tarot';
+                    $room = RoomFactory::create($game, $roomId);
                     $this->rooms[$roomId] = $room;
                     $room->add($from, $client['name']);
                     $client['roomId'] = $roomId;
