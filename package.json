@@ -9,9 +9,12 @@
     "frontend:ws:test": "npm --prefix frontend run ws:test",
     "frontend:ws:sim3": "npm --prefix frontend run ws:sim3",
     "frontend:ws:belote": "npm --prefix frontend run ws:belote",
+    "frontend:ws:holdem": "npm --prefix frontend run ws:holdem",
     "backend:serve": "php backend/bin/server.php",
     "backend:serve:8090": "HOST=127.0.0.1 PORT=8090 php backend/bin/server.php",
     "belote:simulate": "WS_URL=ws://127.0.0.1:8090 npm run frontend:ws:belote",
-    "belote:e2e": "bash scripts/belote-sim.sh"
+    "belote:e2e": "bash scripts/belote-sim.sh",
+    "holdem:simulate": "WS_URL=ws://127.0.0.1:8090 npm run frontend:ws:holdem",
+    "holdem:e2e": "bash scripts/holdem-sim.sh"
   }
 }

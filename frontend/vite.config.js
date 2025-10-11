@@ -9,7 +9,7 @@ export default defineConfig({
       name: 'ws-clienterror-destroy',
       configureServer(server) {
         server.httpServer?.on('clientError', (err, socket) => {
-          try { socket.destroy() } catch {}
+          try { socket.destroy() } catch (e) { void e }
         })
       },
     },

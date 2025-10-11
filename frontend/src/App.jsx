@@ -112,8 +112,9 @@ function App() {
         setRoomState(msg.payload)
         setRoomId(msg.payload?.roomId || '')
         if (msg.payload?.status !== 'discarding') setDiscardSel([])
-        // Réinitialiser 'playable' si état change
-        if (msg.payload?.status !== 'playing') setPlayable([])
+        // Réinitialiser 'playable' (cartes jouables) uniquement pour la Belote hors phase de jeu.
+        // Pour Hold'em, 'playable' transporte l'objet 'allowed' et ne doit pas être vidé.
+        if ((msg.payload?.game === 'belote') && msg.payload?.status !== 'playing') setPlayable([])
         break
       case 'left_room':
         setRoomState(null)
@@ -137,7 +138,7 @@ function App() {
         setHand(msg.payload?.hand || [])
         setIsYourTurn(!!msg.payload?.isYourTurn)
         setYouAreTaker(!!msg.payload?.youAreTaker)
-        setPlayable(msg.payload?.playable || [])
+        setPlayable(msg.payload?.playable || msg.payload?.allowed || [])
         break
       case 'error':
         alert(msg.payload?.message || 'Erreur')
@@ -157,6 +158,12 @@ function App() {
   const restartDeal = () => send('action', { action: 'restart' })
   const finishDeal = () => send('action', { action: 'finish' })
   const chooseTrump = (suit) => send('action', { action: 'choose_trump', params: { suit } })
+  // Hold'em actions
+  const holdemCheck = () => send('action', { action: 'check' })
+  const holdemCall = () => send('action', { action: 'call' })
+  const holdemBet = (amount) => send('action', { action: 'bet', params: { amount } })
+  const holdemRaiseTo = (to) => send('action', { action: 'raise_to', params: { to } })
+  const holdemFold = () => send('action', { action: 'fold' })
   const sendChat = () => { if (!chatInput.trim()) return; send('chat', { text: chatInput }); setChatInput('') }
 
   const placeBid = (bid) => send('action', { action: 'bid', params: { bid } })
@@ -182,8 +189,16 @@ function App() {
   }, [])
 
   const minPlayersFor = (g) => g === 'belote' ? 4 : g === 'holdem' ? 2 : 3
-  const canStart = roomState?.status === 'waiting' && (roomState?.players?.length || 0) >= minPlayersFor(roomState?.game || 'tarot')
-  const canRestart = roomState?.status === 'finished'
+  const playersArr = roomState?.players || []
+  const holdemEligibleCount = (roomState?.game === 'holdem') ? playersArr.filter(p => (p.stack ?? 0) > 0).length : 0
+  const canStart = roomState?.status === 'waiting' && (
+    roomState?.game === 'holdem'
+      ? holdemEligibleCount >= 2
+      : (playersArr.length >= minPlayersFor(roomState?.game || 'tarot'))
+  )
+  const canRestart = roomState?.status === 'finished' && (
+    roomState?.game === 'holdem' ? (holdemEligibleCount >= 2) : true
+  )
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
 
   return (
@@ -238,7 +253,12 @@ function App() {
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) {p.team !== undefined ? `(équipe ${p.team})` : ''} — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}
+                  {p.name} (#{p.id}) {p.team !== undefined ? `(équipe ${p.team})` : ''}
+                  {roomState.game === 'holdem' ? (
+                    <> — stack: {p.stack ?? '—'} — mise: {p.bet ?? 0} {p.folded ? '(couché)' : ''} {p.allin ? '(all-in)' : ''} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''}</>
+                  ) : (
+                    <> — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}</>
+                  )}
                 </li>
               ))}
             </ul>
@@ -321,8 +341,47 @@ function App() {
                 </div>
               </div>
             )}
+            {/* Hold'em */}
+            {roomState.game === 'holdem' && (
+              <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+                <h3>Texas Hold'em</h3>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div>
+                    <b>Cartes communes:</b> {(roomState.community || []).length > 0 ? (
+                      <span> {(roomState.community || []).join(' ')}</span>
+                    ) : (
+                      <span> —</span>
+                    )}
+                  </div>
+                  <div>
+                    <b>Pot:</b> {roomState.potTotal ?? 0}
+                  </div>
+                  <div>
+                    <b>Blinds:</b> {roomState.smallBlind ?? 0}/{roomState.bigBlind ?? 0}
+                  </div>
+                  <div>
+                    <b>Round:</b> {roomState.round || '—'}
+                  </div>
+                  <div>
+                    <b>Mise courante:</b> {roomState.currentBet ?? 0} (min raise: {roomState.minRaise ?? 0})
+                  </div>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <b>Votre main:</b> {hand.length > 0 ? hand.join(' ') : '—'}
+                  {roomState.game === 'holdem' && (
+                    <> — <b>Votre tapis:</b> {(playersArr.find(p => p.id === connId)?.stack) ?? 0}</>
+                  )}
+                </div>
+                {roomState.status === 'waiting' && <p>La donne n'a pas démarré.</p>}
+                {roomState.status === 'dealing' && (
+                  <HoldemActions isYourTurn={isYourTurn} playableInfo={playable} onCheck={holdemCheck} onCall={holdemCall} onBet={holdemBet} onRaiseTo={holdemRaiseTo} onFold={holdemFold} roomState={roomState} />
+                )}
+                {roomState.status === 'showdown' && <p>Showdown… calcul des mains.</p>}
+                {roomState.status === 'finished' && <p>Donne terminée.</p>}
+              </div>
+            )}
             {/* Placeholder autres jeux */}
-            {roomState.game && !['tarot','belote'].includes(roomState.game) && (
+            {roomState.game && !['tarot','belote','holdem'].includes(roomState.game) && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <i>Ce jeu n'est pas encore implémenté dans ce prototype.</i>
               </div>
@@ -347,6 +406,38 @@ function App() {
       </section>
 
       <p style={{ marginTop: 16, fontSize: 12, color: '#666' }}>WS: {WS_URL}</p>
+    </div>
+  )
+}
+
+// Composant d’actions Hold’em
+function HoldemActions({ isYourTurn, playableInfo, onCheck, onCall, onBet, onRaiseTo, onFold, roomState }) {
+  const [betAmt, setBetAmt] = useState('')
+  const [raiseTo, setRaiseTo] = useState('')
+  const allowed = (isYourTurn && playableInfo && typeof playableInfo === 'object' && (playableInfo.fold !== undefined || playableInfo.check !== undefined)) ? playableInfo : null
+  const currentBet = roomState?.currentBet || 0
+
+  return (
+    <div style={{ borderTop: '1px dashed #ddd', paddingTop: 8 }}>
+      <p>{isYourTurn ? 'À vous de parler' : 'En attente...'}</p>
+      {isYourTurn && allowed && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {allowed.fold && <button onClick={onFold}>Fold</button>}
+          {allowed.check && <button onClick={onCheck}>Check</button>}
+          {allowed.call > 0 && <button onClick={onCall}>Call {allowed.call}</button>}
+          {currentBet === 0 ? (
+            <>
+              <input type="number" min={allowed.minBet || 0} placeholder={`Bet ≥ ${allowed.minBet || 0}`} value={betAmt} onChange={e => setBetAmt(e.target.value)} style={{ width: 120 }} />
+              <button onClick={() => onBet(Math.max(parseInt(betAmt||'0',10), allowed.minBet || 0))} disabled={!betAmt}>Bet</button>
+            </>
+          ) : (
+            <>
+              <input type="number" min={allowed.minRaiseTo || 0} placeholder={`Raise to ≥ ${allowed.minRaiseTo || 0}`} value={raiseTo} onChange={e => setRaiseTo(e.target.value)} style={{ width: 160 }} />
+              <button onClick={() => onRaiseTo(Math.max(parseInt(raiseTo||'0',10), allowed.minRaiseTo || 0))} disabled={!raiseTo}>Raise To</button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

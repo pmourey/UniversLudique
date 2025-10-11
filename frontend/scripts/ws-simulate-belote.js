@@ -1,9 +1,7 @@
 /* eslint-env node */
-/* global process */
 // Simulate 4 WS clients playing a Belote deal end-to-end
 // Usage: npm run ws:belote
 import WebSocket from 'ws'
-import process from 'node:process'
 
 const WS_URL = process.env.WS_URL || 'ws://127.0.0.1:8090'
 function delay(ms) { return new Promise(r => setTimeout(r, ms)) }
@@ -24,7 +22,7 @@ class Bot {
       this.ws = ws
       ws.on('open', () => { console.log(`[${this.name}] connected`); resolve() })
       ws.on('message', (data) => this.onMessage(JSON.parse(data.toString())))
-      ws.on('close', () => { /* console.log(`[${this.name}] closed`) */ })
+      ws.on('close', () => { /* no-op on close */ })
       ws.on('error', (err) => { console.error(`[${this.name}] error`, err?.message || err); reject(err) })
     })
   }
@@ -113,7 +111,7 @@ async function run() {
         if ((m.type === 'state' || m.type === 'room_update') && Array.isArray(m.payload?.players)) {
           count = m.payload.players.length
         }
-      } catch {}
+      } catch { /* ignore parse error */ }
     }
     A.ws.on('message', handler)
     const start = Date.now()
@@ -160,12 +158,10 @@ async function run() {
     await delay(20)
   }
 
-  // Force finish if needed
-  if (!finished) { console.log('Forcing finish'); A.action('finish') }
-  await delay(200)
-
-  console.log('Simulation done')
-  A.ws.close(); B.ws.close(); C.ws.close(); D.ws.close()
+  // Close sockets
+  for (const bot of [A,B,C,D]) {
+    try { bot.ws?.close() } catch { /* ignore */ }
+  }
 }
 
-run().catch(e => { console.error('Belote sim error:', e); process.exit(1) })
+run().catch(e => { console.error('Belote sim error:', e) })
