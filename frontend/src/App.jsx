@@ -46,30 +46,33 @@ function App() {
   }
 
   const connect = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
+    const ws = wsRef.current
+    if (ws && ws.readyState !== WebSocket.CLOSED) return
     setStatus('connecting')
     try {
-      const ws = new WebSocket(WS_URL)
-      wsRef.current = ws
+      const wsNew = new WebSocket(WS_URL)
+      wsRef.current = wsNew
 
-      ws.onopen = () => {
+      wsNew.onopen = () => {
         clearReconnect()
         setStatus('connected')
+        // Nouveau: on considère la connexion comme neuve → le nom enregistré n’est plus valide côté serveur
+        setRegisteredName(null)
       }
 
-      ws.onclose = () => {
+      wsNew.onclose = () => {
         setStatus('disconnected')
-        wsRef.current = null
+        if (wsRef.current === wsNew) wsRef.current = null
         setConnId(null)
         scheduleReconnect()
       }
 
-      ws.onerror = () => {
-        setStatus('disconnected')
-        scheduleReconnect()
+      // Ne pas forcer disconnected sur error; on attend le close.
+      wsNew.onerror = () => {
+        // Optionnel: console.warn('WebSocket error')
       }
 
-      ws.onmessage = (ev) => {
+      wsNew.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data)
           handleMessage(msg)
