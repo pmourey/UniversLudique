@@ -21,6 +21,7 @@ yarn-error.log*
 frontend/.env.local
 
 # PHP / Composer
+backup/vendor
 vendor/
 composer.lock
 
