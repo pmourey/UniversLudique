@@ -25,7 +25,7 @@ function App() {
   const [playable, setPlayable] = useState([]) // nouvelles cartes jouables (Belote)
 
   // Nouveau: type de jeu à créer
-  const [newGame, setNewGame] = useState('tarot') // 'tarot' | 'belote' | 'holdem'
+  const [newGame, setNewGame] = useState('dnd5e') // 'tarot' | 'belote' | 'holdem' | 'dnd5e'
   const [holdemEval, setHoldemEval] = useState(null)
 
   const wsRef = useRef(null)
@@ -83,6 +83,7 @@ function App() {
           handleMessage(msg)
         } catch { /* empty */ }
       }
+        // eslint-disable-next-line no-unused-vars
     } catch (e) {
       setStatus('disconnected')
       scheduleReconnect()
@@ -115,6 +116,7 @@ function App() {
       case 'state':
         setRoomState(msg.payload)
         setRoomId(msg.payload?.roomId || '')
+        setHand(msg.payload?.hand || []) // Correction : rafraîchir la main du joueur après restart
         if (msg.payload?.status !== 'discarding') setDiscardSel([])
         // Réinitialiser 'playable' (cartes jouables) uniquement pour la Belote hors phase de jeu.
         // Pour Hold'em, 'playable' transporte l'objet 'allowed' et ne doit pas être vidé.
@@ -220,6 +222,13 @@ function App() {
   const canRestart = (roomState?.status === 'finished' || roomState?.status === 'scoring') && (
     roomState?.game === 'holdem' ? (holdemEligibleCount >= 2) : true
   )
+
+  // Pour DnD5e : bouton actif si status 'waiting' ou 'finished' et il y a au moins un joueur et un monstre
+  const canStartDnD = roomState?.game === 'dnd5e' &&
+    (roomState.status === 'waiting' || roomState.status === 'finished') &&
+    (roomState.players?.length > 0) && (roomState.monsters?.length > 0)
+
+  // Bouton "Terminer la donne" : actif si tous les joueurs n'ont plus de cartes en main (pour Tarot/Belote)
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
 
   return (
@@ -248,6 +257,7 @@ function App() {
               <option value="tarot">Tarot</option>
               <option value="belote">Belote</option>
               <option value="holdem">Texas Hold'em</option>
+              <option value="dnd5e">DnD 5e</option>
             </select>
           </label>
           <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
@@ -411,10 +421,25 @@ function App() {
                 {roomState.status === 'finished' && <p>Donne terminée.</p>}
               </div>
             )}
-            {/* Placeholder autres jeux */}
-            {roomState.game && !['tarot','belote','holdem'].includes(roomState.game) && (
+            {/* DnD 5e */}
+            {roomState.game === 'dnd5e' && (
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                <i>Ce jeu n'est pas encore implémenté dans ce prototype.</i>
+                <h3>DnD 5e — Arène</h3>
+                {roomState.status === 'waiting' && (
+                  <DnDMonsterSetup roomId={roomState.roomId} send={send} />
+                )}
+                {roomState.status === 'fighting' && (
+                  <DnDCombatView roomState={roomState} connId={connId} send={send} />
+                )}
+                {roomState.status === 'finished' && (
+                  <div>Combat terminé.</div>
+                )}
+              </div>
+            )}
+            {/* Placeholder autres jeux */}
+            {roomState.game && !['tarot','belote','holdem','dnd5e'].includes(roomState.game) && (
+              <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+                {/* Message supprimé pour DnD5e */}
               </div>
             )}
           </div>
@@ -479,6 +504,105 @@ function HoldemActions({ isYourTurn, playableInfo, onCheck, onCall, onBet, onRai
       )}
     </div>
   )
+}
+
+// Composant de configuration des monstres pour DnD
+function DnDMonsterSetup({ roomId, send }) {
+  const [monsters, setMonsters] = useState([
+    { name: 'Gobelin', hp: 8, max_hp: 8, dmg: 3, ac: 13, cr: 1, dex: 14 },
+    { name: 'Orc', hp: 15, max_hp: 15, dmg: 5, ac: 13, cr: 2, dex: 12 },
+  ]);
+  const handleChange = (i, field, value) => {
+    setMonsters(m => m.map((mon, idx) => idx === i ? { ...mon, [field]: value } : mon));
+  };
+  const addMonster = () => setMonsters(m => [...m, { name: '', hp: 10, max_hp: 10, dmg: 2, ac: 10, cr: 1, dex: 10 }]);
+  const removeMonster = (i) => setMonsters(m => m.filter((_, idx) => idx !== i));
+  const submit = () => {
+    send('action', { action: 'set_monsters', params: { monsters } });
+    send('action', { action: 'start_combat' });
+  };
+  return (
+    <div>
+      <h4>Configuration des monstres</h4>
+      {monsters.map((m, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
+          <input value={m.name} onChange={e => handleChange(i, 'name', e.target.value)} placeholder="Nom" style={{ width: 80 }} />
+          <input type="number" value={m.hp} onChange={e => handleChange(i, 'hp', +e.target.value)} placeholder="HP" style={{ width: 50 }} />
+          <input type="number" value={m.max_hp} onChange={e => handleChange(i, 'max_hp', +e.target.value)} placeholder="Max HP" style={{ width: 60 }} />
+          <input type="number" value={m.dmg} onChange={e => handleChange(i, 'dmg', +e.target.value)} placeholder="Dégâts" style={{ width: 60 }} />
+          <input type="number" value={m.ac} onChange={e => handleChange(i, 'ac', +e.target.value)} placeholder="AC" style={{ width: 40 }} />
+          <input type="number" value={m.cr} onChange={e => handleChange(i, 'cr', +e.target.value)} placeholder="CR" style={{ width: 40 }} />
+          <input type="number" value={m.dex} onChange={e => handleChange(i, 'dex', +e.target.value)} placeholder="Dex" style={{ width: 40 }} />
+          <button onClick={() => removeMonster(i)} disabled={monsters.length <= 1}>Suppr</button>
+        </div>
+      ))}
+      <button onClick={addMonster}>Ajouter un monstre</button>
+      <button onClick={submit} style={{ marginLeft: 8 }}>Lancer le combat</button>
+    </div>
+  );
+}
+// Composant d'affichage et d'action du combat DnD
+function DnDCombatView({ roomState, connId, send }) {
+  const { players = [], monsters = [], initiative = [], turn, log = [] } = roomState;
+  const myPlayer = players.find(p => p.id === connId);
+  const isMyTurn = turn === connId && myPlayer && myPlayer.status === 'OK';
+  const canAttack = isMyTurn;
+  const handleAttack = (targetId) => {
+    send('action', { action: 'attack', params: { attacker: connId, target: targetId } });
+  };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 32 }}>
+        <div>
+          <b>Aventuriers</b>
+          <ul>
+            {players.map(p => (
+              <li key={p.id} style={{ color: p.status === 'Dead' ? 'red' : undefined }}>
+                {p.name} (HP: {p.hp}/{p.max_hp}, Dégâts: {p.dmg}, AC: {p.ac}, Dex: {p.dex}) {p.status === 'Dead' && '💀'}
+                {turn === p.id && <b> ← Tour</b>}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <b>Monstres</b>
+          <ul>
+            {monsters.map(m => (
+              <li key={m.id} style={{ color: m.status === 'Dead' ? 'red' : undefined }}>
+                {m.name} (HP: {m.hp}/{m.max_hp}, Dégâts: {m.dmg}, AC: {m.ac}, Dex: {m.dex}, CR: {m.cr}) {m.status === 'Dead' && '💀'}
+                {canAttack && m.status === 'OK' && (
+                  <button onClick={() => handleAttack(m.id)} style={{ marginLeft: 8 }}>Attaquer</button>
+                )}
+                {turn === m.id && <b> ← Tour</b>}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <b>Initiative</b>
+          <ol>
+            {initiative.map((e, i) => (
+              <li key={i} style={{ fontWeight: turn === e.id ? 'bold' : undefined }}>
+                {e.type === 'player'
+                  ? (players.find(p => p.id === e.id)?.name || e.id)
+                  : (monsters.find(m => m.id === e.id)?.name || e.id)
+                }
+                {turn === e.id && ' ← Tour'}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <b>Log du combat :</b>
+        <ul style={{ maxHeight: 120, overflow: 'auto', background: '#f9f9f9', padding: 8, borderRadius: 4, color: '#222' }}>
+          {log.map((l, i) => (
+            <li key={i}><b>{l[0]}</b>: {l[1]}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 export default App

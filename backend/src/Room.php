@@ -6,7 +6,7 @@ use SplObjectStorage;
 
 class Room
 {
-    private $id;
+    protected $id;
     private $players; // SplObjectStorage<ConnectionInterface, array>
 
     private $status = 'waiting'; // waiting | bidding | discarding | playing | scoring | finished
