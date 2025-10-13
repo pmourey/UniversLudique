@@ -5,9 +5,36 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      #root {
+        flex: 1 0 auto;
+      }
+      footer {
+        flex-shrink: 0;
+        text-align: center;
+        margin-top: 2em;
+        padding: 1em 0;
+        background: none;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <footer>
+      <a href="https://github.com/pmourey/Tarot" target="_blank" rel="noopener noreferrer">
+        Voir le dépôt GitHub du projet
+      </a>
+    </footer>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

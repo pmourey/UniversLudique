@@ -17,12 +17,30 @@ class GameServer implements MessageComponentInterface
 
     public function onOpen(ConnectionInterface $conn)
     {
-        // Log d'ouverture de connexion
-        echo "[WS] OPEN #" . (isset($conn->resourceId) ? $conn->resourceId : 'unknown') . "\n";
+        // Récupération de l'adresse IP
+        $ip = isset($conn->remoteAddress) ? $conn->remoteAddress : 'unknown';
+        // Ajout : récupération de l'IP réelle si transmise par le proxy (X-Forwarded-For)
+        if (isset($conn->httpRequest) && method_exists($conn->httpRequest, 'getHeader') && $conn->httpRequest->hasHeader('X-Forwarded-For')) {
+            $xff = $conn->httpRequest->getHeader('X-Forwarded-For');
+            if (is_array($xff) && count($xff) > 0) {
+                $ip = trim(explode(',', $xff[0])[0]);
+            }
+        }
+        // Récupération du User-Agent
+        $userAgent = method_exists($conn, 'httpRequest') && $conn->httpRequest && $conn->httpRequest->hasHeader('User-Agent')
+            ? $conn->httpRequest->getHeader('User-Agent')[0]
+            : (isset($conn->httpRequest) && method_exists($conn->httpRequest, 'getHeader') && $conn->httpRequest->getHeader('User-Agent')
+                ? $conn->httpRequest->getHeader('User-Agent')[0]
+                : 'unknown');
+        // Affichage dans la console (OPEN uniquement)
+        echo "[WS] OPEN #" . (isset($conn->resourceId) ? $conn->resourceId : 'unknown') .
+            " | IP: $ip | UA: $userAgent\n";
         $this->clients[$conn] = [
             'id' => $conn->resourceId,
             'name' => null,
             'roomId' => null,
+            'ip' => $ip,
+            'userAgent' => $userAgent,
         ];
         $this->send($conn, [
             'type' => 'welcome',
@@ -80,10 +98,10 @@ class GameServer implements MessageComponentInterface
                     $game = isset($payload['game']) ? (string)$payload['game'] : 'tarot';
                     $room = RoomFactory::create($game, $roomId);
                     $this->rooms[$roomId] = $room;
-                    $room->add($from, $client['name']);
-                    $client['roomId'] = $roomId;
-                    $this->clients[$from] = $client;
-                    $this->send($from, [ 'type' => 'room_joined', 'payload' => $room->serializeState() ]);
+                    // Ne pas ajouter le créateur au salon automatiquement
+                    // Ne pas attribuer roomId au client
+                    // Ne pas envoyer 'room_joined' ici
+                    $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
                     break;
 
                 case 'join_room':
@@ -149,8 +167,11 @@ class GameServer implements MessageComponentInterface
 
                 case 'list_rooms':
                     $summaries = array();
+                    $filterGame = isset($payload['game']) ? (string)$payload['game'] : null;
                     foreach ($this->rooms as $r) {
-                        $summaries[] = $r->serializeSummary();
+                        $summary = $r->serializeSummary();
+                        if ($filterGame && isset($summary['game']) && $summary['game'] !== $filterGame) continue;
+                        $summaries[] = $summary;
                     }
                     $this->send($from, [
                         'type' => 'rooms',
@@ -168,7 +189,7 @@ class GameServer implements MessageComponentInterface
 
     public function onClose(ConnectionInterface $conn)
     {
-        // Log de fermeture de connexion
+        // Affichage simplifié (plus d'IP/UA)
         echo "[WS] CLOSE #" . (isset($conn->resourceId) ? $conn->resourceId : 'unknown') . "\n";
         $client = isset($this->clients[$conn]) ? $this->clients[$conn] : null;
         if ($client) {

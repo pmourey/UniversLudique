@@ -9,6 +9,7 @@ class TarotRoom implements GameRoom
     private $game = 'tarot';
     private $id;
     private $players; // SplObjectStorage<ConnectionInterface, array>
+    private $name = '';
 
     private $status = 'waiting'; // waiting | bidding | discarding | playing | scoring | finished
     private $dealerId = null;
@@ -28,9 +29,10 @@ class TarotRoom implements GameRoom
     private $won = array(); // id => array of won cards
     private $tricksWon = array(); // id => int
 
-    public function __construct($id)
+    public function __construct($id, $name = '')
     {
         $this->id = (string)$id;
+        $this->name = (string)$name;
         $this->players = new SplObjectStorage();
     }
 
@@ -118,12 +120,13 @@ class TarotRoom implements GameRoom
 
     public function serializeSummary()
     {
-        return array(
+        return [
             'roomId' => $this->id,
-            'players' => count($this->players),
-            'status' => $this->status,
+            'name' => $this->name,
             'game' => $this->game,
-        );
+            'players' => count($this->seats),
+            'status' => $this->status,
+        ];
     }
 
     public function startGame()

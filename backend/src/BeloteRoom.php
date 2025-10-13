@@ -8,6 +8,7 @@ class BeloteRoom implements GameRoom
 {
     private $game = 'belote';
     private $id;
+    private $name = '';
     private $players; // SplObjectStorage<ConnectionInterface, array>
 
     private $status = 'waiting'; // waiting | choosing_trump | playing | finished
@@ -25,9 +26,10 @@ class BeloteRoom implements GameRoom
     private $tricksWon = array(); // id => int
     private $lastTrickWinnerId = null;
 
-    public function __construct($id)
+    public function __construct($id, $name = '')
     {
         $this->id = (string)$id;
+        $this->name = (string)$name;
         $this->players = new SplObjectStorage();
     }
 
@@ -98,12 +100,13 @@ class BeloteRoom implements GameRoom
 
     public function serializeSummary()
     {
-        return array(
+        return [
             'roomId' => $this->id,
-            'players' => count($this->players),
-            'status' => $this->status,
+            'name' => $this->name,
             'game' => $this->game,
-        );
+            'players' => count($this->seats),
+            'status' => $this->status,
+        ];
     }
 
     public function startGame()

@@ -1,6 +1,8 @@
 <?php
 namespace Tarot;
 
+require_once __DIR__ . '/lib/PokerEvaluator.php';
+
 use Ratchet\ConnectionInterface;
 use SplObjectStorage;
 
@@ -35,10 +37,12 @@ class HoldemRoom implements GameRoom
     private $lastAggressorId = null; // dernier relanceur
     private $acted = array();       // id => bool (a agi depuis la dernière relance)
     private $communityRevealed = 0; // 0,3,4,5
+    private $name = '';
 
-    public function __construct($id)
+    public function __construct($id, $name = '')
     {
         $this->id = (string)$id;
+        $this->name = (string)$name;
         $this->players = new SplObjectStorage();
     }
 
@@ -110,9 +114,10 @@ class HoldemRoom implements GameRoom
     {
         return [
             'roomId' => $this->id,
-            'players' => count($this->players),
-            'status' => $this->status,
+            'name' => $this->name,
             'game' => $this->game,
+            'players' => count($this->seats),
+            'status' => $this->status,
         ];
     }
 
@@ -152,6 +157,24 @@ class HoldemRoom implements GameRoom
     public function handleAction(ConnectionInterface $from, $action, array $params = array())
     {
         $pid = $from->resourceId;
+        // Traiter restart et finish quel que soit le statut ou le joueur
+        if ($action === 'restart') {
+            error_log('[HoldemRoom] Action restart reçue pour la salle ' . $this->id);
+            if (count($this->seats) < 2) return;
+            $this->resetGame();
+            $this->broadcast([ 'type' => 'notice', 'payload' => [ 'message' => 'Nouvelle donne…' ] ]);
+            $this->startGame();
+            $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
+            error_log('[HoldemRoom] Nouvelle donne lancée et état diffusé pour la salle ' . $this->id);
+            return;
+        }
+        if ($action === 'finish') {
+            if ($this->status !== 'finished') {
+                $this->status = 'finished';
+                $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
+            }
+            return;
+        }
         if ($this->status !== 'dealing') { return; }
         if ($this->currentPlayerId() !== $pid) { return; }
         if ($this->isFolded($pid) || $this->isAllin($pid)) { $this->advanceTurn(); return; }
@@ -207,18 +230,6 @@ class HoldemRoom implements GameRoom
                 // Si un seul joueur reste non couché → gagne tout de suite
                 if ($this->activePlayersCount() <= 1) { $this->awardAllToLastStanding(); return; }
                 $this->advanceTurn();
-                break;
-            case 'restart':
-                if (count($this->seats) < 2) return;
-                $this->resetGame();
-                $this->broadcast([ 'type' => 'notice', 'payload' => [ 'message' => 'Nouvelle donne…' ] ]);
-                $this->startGame();
-                break;
-            case 'finish':
-                if ($this->status !== 'finished') {
-                    $this->status = 'finished';
-                    $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
-                }
                 break;
             default:
                 $this->broadcast([ 'type' => 'notice', 'payload' => [ 'message' => "Texas Hold'em: action non reconnue." ] ]);
@@ -342,22 +353,30 @@ class HoldemRoom implements GameRoom
         if ($this->round === 'preflop') {
             $this->communityRevealed = 3; $this->round = 'flop';
             $this->startNewStreetFromDealer();
+            $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
+            $this->evaluateHands(); // Ajouté : envoie la probabilité après le flop
+            $this->sendPrivateStates();
         } elseif ($this->round === 'flop') {
             $this->communityRevealed = 4; $this->round = 'turn';
             $this->startNewStreetFromDealer();
+            $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
+            $this->evaluateHands(); // Ajouté : envoie la probabilité après le turn
+            $this->sendPrivateStates();
         } elseif ($this->round === 'turn') {
             $this->communityRevealed = 5; $this->round = 'river';
             $this->startNewStreetFromDealer();
+            $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
+            $this->evaluateHands(); // Ajouté : envoie la probabilité après la river
+            $this->sendPrivateStates();
         } else { // river → showdown
             $this->status = 'showdown';
             $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
             $this->announceWinnersSidePots();
+            $this->evaluateHands(); // Évaluer les mains des joueurs restants
             $this->status = 'finished';
             $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
             return;
         }
-        $this->broadcast([ 'type' => 'state', 'payload' => $this->serializeState() ]);
-        $this->sendPrivateStates();
     }
 
     private function startNewStreetFromDealer()
@@ -719,5 +738,114 @@ class HoldemRoom implements GameRoom
             return ($va > $vb) ? 1 : -1;
         }
         return 0;
+    }
+
+    // Simulation Monte Carlo pour estimer la probabilité de gagner de chaque joueur
+    private function simulateWinProbabilities($numSimulations = 500)
+    {
+        $playerIds = [];
+        $playerHands = [];
+        foreach ($this->players as $conn) {
+            $id = $conn->resourceId;
+            if (!empty($this->folded[$id])) continue;
+            if (!isset($this->hands[$id]) || count($this->hands[$id]) < 2) continue;
+            $playerIds[] = $id;
+            $playerHands[$id] = $this->hands[$id];
+        }
+        if (count($playerIds) < 2) return array();
+        $community = $this->community;
+        $revealed = $this->communityRevealed;
+        $knownCommunity = array_slice($community, 0, $revealed);
+        $unknownCount = 5 - $revealed;
+        // Construire le deck restant
+        $deck = $this->generateDeck52();
+        // Retirer toutes les cartes déjà distribuées
+        foreach ($playerHands as $hand) foreach ($hand as $c) {
+            $idx = array_search($c, $deck); if ($idx !== false) unset($deck[$idx]);
+        }
+        foreach ($knownCommunity as $c) {
+            $idx = array_search($c, $deck); if ($idx !== false) unset($deck[$idx]);
+        }
+        $deck = array_values($deck);
+        // Compteur de victoires
+        $winCounts = array_fill_keys($playerIds, 0);
+        for ($sim = 0; $sim < $numSimulations; $sim++) {
+            $simDeck = $deck;
+            shuffle($simDeck);
+            $simCommunity = $knownCommunity;
+            for ($i = 0; $i < $unknownCount; $i++) {
+                $simCommunity[] = array_pop($simDeck);
+            }
+            // Évaluer chaque main
+            $scores = [];
+            foreach ($playerIds as $id) {
+                $fullHand = array_merge($playerHands[$id], $simCommunity);
+                $result = \PokerEvaluator::evaluate($fullHand);
+                $scores[$id] = $result['value'];
+            }
+            $maxScore = max($scores);
+            $winners = array_keys(array_filter($scores, function($v) use ($maxScore) { return $v === $maxScore; }));
+            foreach ($winners as $id) {
+                $winCounts[$id] += 1.0 / count($winners); // split pot
+            }
+        }
+        // Calcul du pourcentage
+        $probs = [];
+        foreach ($winCounts as $id => $count) {
+            $probs[$id] = round(100 * $count / $numSimulations, 1);
+        }
+        // DEBUG TEMP : journaliser les joueurs et les probabilités calculées
+        error_log('simulateWinProbabilities: playerIds=' . json_encode($playerIds));
+        error_log('simulateWinProbabilities: playerHands=' . json_encode($playerHands));
+        error_log('simulateWinProbabilities: probs=' . json_encode($probs));
+        return $probs;
+    }
+
+    private function evaluateHands()
+    {
+        // On suppose que $this->community contient les 5 cartes du board
+        // et $this->hands[id] contient les 2 cartes du joueur
+        // Détermination du ou des gagnants au showdown
+        $scores = [];
+        foreach ($this->players as $conn) {
+            $id = $conn->resourceId;
+            if (!empty($this->folded[$id])) continue;
+            if (!isset($this->hands[$id]) || count($this->hands[$id]) < 2) continue;
+            $playerHand = $this->hands[$id];
+            $fullHand = array_merge($playerHand, $this->community);
+            $result = \PokerEvaluator::evaluate($fullHand);
+            $scores[$id] = $result['value'];
+        }
+        $maxScore = empty($scores) ? null : max($scores);
+        // Correction : synchroniser communityRevealed avec le nombre de cartes du board si besoin
+        if (count($this->community) === 5 && $this->communityRevealed < 5) {
+            $this->communityRevealed = 5;
+        }
+        // Calculer les probabilités si pas showdown
+        $probs = ($this->round !== 'showdown') ? $this->simulateWinProbabilities(500) : [];
+        foreach ($this->players as $conn) {
+            $id = $conn->resourceId;
+            if (!empty($this->folded[$id])) continue;
+            if (!isset($this->hands[$id]) || count($this->hands[$id]) < 2) continue;
+            $playerHand = $this->hands[$id];
+            $fullHand = array_merge($playerHand, $this->community);
+            $result = \PokerEvaluator::evaluate($fullHand);
+            // Probabilité de gagner : simulation Monte Carlo ou 100%/0% au showdown
+            $winProb = ($this->round === 'showdown')
+                ? (($scores[$id] === $maxScore) ? 100 : 0)
+                : (isset($probs[$id]) ? $probs[$id] : '—');
+            $conn->send(json_encode([
+                'type' => 'hand_evaluation',
+                'payload' => [
+                    'playerId' => $id,
+                    'hand' => $fullHand,
+                    'rank' => $result['handTypeString'] ?? '',
+                    'value' => $result['value'],
+                    'winProb' => $winProb,
+                    'allWinProbs' => $probs, // Ajout : toutes les probabilités
+                    'round' => $this->round,
+                ]
+            ]));
+        }
     }
 }

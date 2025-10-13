@@ -26,6 +26,7 @@ function App() {
 
   // Nouveau: type de jeu à créer
   const [newGame, setNewGame] = useState('tarot') // 'tarot' | 'belote' | 'holdem'
+  const [holdemEval, setHoldemEval] = useState(null)
 
   const wsRef = useRef(null)
   const reconnectRef = useRef({ attempts: 0, timer: null })
@@ -82,7 +83,6 @@ function App() {
           handleMessage(msg)
         } catch { /* empty */ }
       }
-        // eslint-disable-next-line no-unused-vars
     } catch (e) {
       setStatus('disconnected')
       scheduleReconnect()
@@ -105,6 +105,10 @@ function App() {
         break
       case 'rooms':
         setRooms(msg.payload || [])
+        break
+      case 'room_created':
+        // Après création d'un salon, rafraîchir la liste du bon jeu
+        listRooms(msg.payload?.game || newGame);
         break
       case 'room_joined':
       case 'room_update':
@@ -143,6 +147,9 @@ function App() {
       case 'error':
         alert(msg.payload?.message || 'Erreur')
         break
+      case 'hand_evaluation':
+        setHoldemEval(msg.payload);
+        break;
       default:
         break
     }
@@ -151,7 +158,7 @@ function App() {
   // Actions jeu
   const doRegister = () => name.trim() && send('register', { name: name.trim() })
   const createRoom = () => send('create_room', { game: newGame })
-  const listRooms = () => send('list_rooms')
+  const listRooms = (game) => send('list_rooms', { game: game || newGame })
   const joinRoom = () => roomId.trim() && send('join_room', { roomId: roomId.trim() })
   const leaveRoom = () => send('leave_room')
   const startGame = () => send('start_game')
@@ -188,6 +195,19 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Rafraîchir automatiquement la liste des salons à chaque changement de jeu sélectionné
+  useEffect(() => {
+    if (status === 'connected') {
+      listRooms();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newGame, status]);
+
+  useEffect(() => {
+    // Calculer la probabilité de chaque joueur Hold'em via l'API PHP
+    // (fonctionnalité désactivée car variables associées supprimées)
+  }, [roomState?.game, hand, roomState?.community, roomState?.players, connId]);
+
   const minPlayersFor = (g) => g === 'belote' ? 4 : g === 'holdem' ? 2 : 3
   const playersArr = roomState?.players || []
   const holdemEligibleCount = (roomState?.game === 'holdem') ? playersArr.filter(p => (p.stack ?? 0) > 0).length : 0
@@ -196,7 +216,8 @@ function App() {
       ? holdemEligibleCount >= 2
       : (playersArr.length >= minPlayersFor(roomState?.game || 'tarot'))
   )
-  const canRestart = roomState?.status === 'finished' && (
+  // Autoriser le bouton si la partie est terminée (finished ou scoring)
+  const canRestart = (roomState?.status === 'finished' || roomState?.status === 'scoring') && (
     roomState?.game === 'holdem' ? (holdemEligibleCount >= 2) : true
   )
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
@@ -219,15 +240,17 @@ function App() {
       <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
         <h2>Salons</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-          <label>Jeu:&nbsp;
-            <select value={newGame} onChange={(e) => setNewGame(e.target.value)}>
+          <label>Choisir jeu:&nbsp;
+            <select value={newGame} onChange={(e) => {
+              setNewGame(e.target.value);
+              // listRooms(); // SUPPRIMÉ : le rafraîchissement est maintenant dans useEffect
+            }}>
               <option value="tarot">Tarot</option>
               <option value="belote">Belote</option>
               <option value="holdem">Texas Hold'em</option>
             </select>
           </label>
           <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
-          <button onClick={listRooms} disabled={status !== 'connected'}>Lister les salons</button>
           <input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ID du salon" />
           <button onClick={joinRoom} disabled={status !== 'connected' || !roomId}>Rejoindre</button>
           <button onClick={leaveRoom} disabled={!roomState}>Quitter</button>
@@ -359,12 +382,20 @@ function App() {
                   <div>
                     <b>Blinds:</b> {roomState.smallBlind ?? 0}/{roomState.bigBlind ?? 0}
                   </div>
-                  <div>
-                    <b>Round:</b> {roomState.round || '—'}
-                  </div>
-                  <div>
-                    <b>Mise courante:</b> {roomState.currentBet ?? 0} (min raise: {roomState.minRaise ?? 0})
-                  </div>
+                </div>
+                {/* Affichage des probabilités de victoire pour chaque joueur (backend) */}
+                <div style={{ marginTop: 8 }}>
+                  <b>Probabilité de gagner (calcul backend) :</b>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {(roomState.players || []).map((p) => (
+                      <li key={p.id} style={{ color: p.id === connId ? '#1976d2' : undefined }}>
+                        {p.name} (#{p.id}) :&nbsp;
+                        {holdemEval && holdemEval.allWinProbs && typeof holdemEval.allWinProbs[p.id] !== 'undefined'
+                          ? `${holdemEval.allWinProbs[p.id]} %`
+                          : '—'}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
                 <div style={{ marginTop: 8 }}>
                   <b>Votre main:</b> {hand.length > 0 ? hand.join(' ') : '—'}
@@ -404,6 +435,14 @@ function App() {
           <button onClick={sendChat} disabled={!roomState}>Envoyer</button>
         </div>
       </section>
+
+      {holdemEval && (
+        <div className="holdem-eval">
+          <div>Phase : <b>{holdemEval.round}</b></div>
+          <div>Probabilité de gagner : <b>{(holdemEval.winProb !== undefined && holdemEval.winProb !== '—') ? holdemEval.winProb + ' %' : '—'}</b></div>
+          <div>Rang de la main : <b>{holdemEval.rank}</b></div>
+        </div>
+      )}
 
       <p style={{ marginTop: 16, fontSize: 12, color: '#666' }}>WS: {WS_URL}</p>
     </div>
