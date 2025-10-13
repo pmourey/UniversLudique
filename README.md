@@ -1,4 +1,9 @@
-# Plateforme Multijeux de Cartes en Temps Réel : Tarot, Belote & Texas Hold'em (Backend PHP + Frontend React)
+# Plateforme Multi-joueurs (au tour par tour)
+
+Jeux de cartes : Tarot, Belote, Texas Hold'em  
+Jeux de simulation : DnD 5e
+
+(Backend PHP + Frontend React)
 
 <!-- Vous pouvez ajouter d'autres titres ici si nécessaire -->
 
@@ -43,6 +48,7 @@ Navigateur (React UI)
 - [Règles du Tarot (résumé)](#règles-du-tarot-résumé)
 - [Règles de la Belote (résumé)](#règles-de-la-belote-résumé)
 - [Règles du Texas Hold’em (résumé)](#règles-du-texas-holdem-résumé)
+- [Règles de l’Arène DnD 5e (résumé)](#règles-de-larène-dnd-5e-résumé)
 - [Roadmap](#roadmap)
 - [Dépannage](#dépannage)
 
@@ -212,6 +218,25 @@ npm run frontend:ws:holdem   # 4 bots WS (check/call/bet/raise automatiques jusq
 # ou
 npm run holdem:e2e           # démarrage backend + simulation + arrêt backend
 ```
+
+### Règles de l’Arène DnD 5e (résumé)
+
+- Mode arène JcJ/JcE inspiré de D&D 5e : chaque joueur incarne un aventurier, affronte des monstres générés par l’hôte.
+- Système d’initiative : chaque entité (joueur ou monstre) joue à son tour selon un jet d’initiative (d20 + DEX).
+- À son tour, un joueur peut attaquer un monstre ou boire une potion (si disponible et PV bas).
+- Les monstres attaquent automatiquement un joueur vivant à leur tour.
+- Points de vie, dégâts, armure, potions, or, XP et montée de niveau gérés automatiquement.
+- Quand tous les monstres sont vaincus, les survivants se partagent l’or et les potions du butin.
+- Les joueurs gagnent de l’XP en tuant des monstres et montent de niveau, ce qui améliore leurs stats.
+- Statut de chaque joueur : [OK] (vivant) ou [DEAD] (mort).
+
+Exemple de déroulement :
+1. Les joueurs rejoignent le salon DnD 5e, l’hôte configure les monstres.
+2. Le combat commence : chaque entité joue à son tour selon l’initiative.
+3. Les joueurs peuvent attaquer ou boire une potion à leur tour.
+4. Les monstres attaquent automatiquement.
+5. Quand tous les monstres sont morts, les survivants reçoivent le butin et l’XP.
+6. Les joueurs peuvent relancer un combat avec de nouveaux monstres.
 
 ## Roadmap
 - Règles de pli complètes + calcul des scores correct.
