@@ -34,6 +34,8 @@ class DnDRoom extends Room implements GameRoom {
         $player['ac'] = 12;
         $player['dex'] = 13;
         $player['status'] = 'OK';
+        $player['gold'] = 0; // Ajout or
+        $player['potions'] = 0; // Ajout potions
         $this->dndPlayers[$player['id']] = $player;
     }
 
@@ -177,6 +179,7 @@ class DnDRoom extends Room implements GameRoom {
         $monstresVivants = array_filter($this->monsters, function($m) { return $m['status'] === 'OK'; });
         if (count($this->monsters) > 0 && count($monstresVivants) === 0) {
             $this->status = 'finished';
+            $this->grantTreasure(); // Ajout du trésor
             $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
         }
     }
@@ -252,6 +255,16 @@ class DnDRoom extends Room implements GameRoom {
                 $this->startCombat();
                 $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
                 break;
+            case 'drink_potion':
+                $playerId = $from->resourceId;
+                if (isset($this->dndPlayers[$playerId]) && $this->dndPlayers[$playerId]['potions'] > 0) {
+                    $heal = 10; // Valeur fixe ou calculée selon CR
+                    $this->dndPlayers[$playerId]['potions'] -= 1;
+                    $this->dndPlayers[$playerId]['hp'] = min($this->dndPlayers[$playerId]['hp'] + $heal, $this->dndPlayers[$playerId]['max_hp']);
+                    $this->log[] = ['system', $this->dndPlayers[$playerId]['name'] . ' boit une potion et récupère ' . $heal . ' PV.'];
+                }
+                $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
+                break;
             default:
                 // action inconnue
                 break;
@@ -311,5 +324,27 @@ class DnDRoom extends Room implements GameRoom {
     public function startGame() {
         // Pour DnD, démarrer le combat = startCombat
         $this->startCombat();
+    }
+    // Ajoute le trésor (or et potions) aux joueurs vivants à la fin du combat
+    private function grantTreasure() {
+        $totalGold = 0;
+        $totalPotions = 0;
+        foreach ($this->monsters as $m) {
+            if ($m['status'] === 'Dead') {
+                $cr = isset($m['cr']) ? $m['cr'] : 1;
+                $totalGold += $cr * 10; // 10 or par CR
+                $totalPotions += 1; // 1 potion par monstre tué
+            }
+        }
+        $alivePlayers = array_filter($this->dndPlayers, function($p) { return $p['status'] === 'OK'; });
+        $n = count($alivePlayers);
+        if ($n > 0) {
+            $goldPerPlayer = intval($totalGold / $n);
+            $potionsPerPlayer = intval($totalPotions / $n);
+            foreach ($alivePlayers as &$p) {
+                $p['gold'] += $goldPerPlayer;
+                $p['potions'] += $potionsPerPlayer;
+            }
+        }
     }
 }

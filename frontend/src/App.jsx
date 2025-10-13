@@ -286,9 +286,11 @@ function App() {
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) {p.team !== undefined ? `(équipe ${p.team})` : ''}
+                  {p.name} (#{p.id}) <span style={{fontWeight:'bold'}}>[{p.status === 'OK' ? 'OK' : 'DEAD'}]</span> {p.team !== undefined ? `(équipe ${p.team})` : ''}
                   {roomState.game === 'holdem' ? (
                     <> — stack: {p.stack ?? '—'} — mise: {p.bet ?? 0} {p.folded ? '(couché)' : ''} {p.allin ? '(all-in)' : ''} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''}</>
+                  ) : roomState.game === 'dnd5e' ? (
+                    <> — Niveau: {p.level ?? 1} — Gold: {p.gold ?? 0} — Potions: {p.potions ?? 0}</>
                   ) : (
                     <> — cartes: {p.handCount ?? 0} — plis: {p.tricksWon ?? 0} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''} {roomState.takerId === p.id ? ' (preneur)' : ''}</>
                   )}
@@ -547,11 +549,27 @@ function DnDCombatView({ roomState, connId, send }) {
   const myPlayer = players.find(p => p.id === connId);
   const isMyTurn = turn === connId && myPlayer && myPlayer.status === 'OK';
   const canAttack = isMyTurn;
+  // Ajout : conditions pour boire une potion
+  // Le bouton ne s'affiche que si c'est le tour du joueur connecté
+  const canDrinkPotion = myPlayer && isMyTurn && myPlayer.potions > 0 && myPlayer.hp < myPlayer.max_hp && myPlayer.hp <= 0.5 * myPlayer.max_hp;
   const handleAttack = (targetId) => {
     send('action', { action: 'attack', params: { attacker: connId, target: targetId } });
   };
+  // Ajout : handler pour boire une potion
+  const handleDrinkPotion = () => {
+    send('action', { action: 'drink_potion' });
+  };
   return (
     <div>
+      {/* Inventaire du joueur connecté */}
+      {myPlayer && (
+        <div style={{ marginBottom: 8 }}>
+          <b>Inventaire :</b> Or : {myPlayer.gold ?? 0} — Potions : {myPlayer.potions ?? 0}
+          {canDrinkPotion && (
+            <button style={{ marginLeft: 12 }} onClick={handleDrinkPotion}>Boire Potion (+10 PV)</button>
+          )}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 32 }}>
         <div>
           <b>Aventuriers</b>
