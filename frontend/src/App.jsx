@@ -6,9 +6,9 @@ const WS_URL = DEFAULT_WS
 // console.log('WebSocket URL utilisée :', WS_URL)
 
 // Helpers persistance localStorage
-const LS_NAME = 'tarot_name'
-const LS_REGISTERED = 'tarot_registeredName'
-const LS_ROOMID = 'tarot_roomId'
+const LS_NAME = 'player_name'
+const LS_REGISTERED = 'player_registeredName'
+const LS_ROOMID = 'player_roomId'
 
 function App() {
   // Initialisation depuis localStorage
@@ -34,6 +34,9 @@ function App() {
   // Nouveau: type de jeu à créer
   const [newGame, setNewGame] = useState('dnd5e') // 'tarot' | 'belote' | 'holdem' | 'dnd5e'
   const [holdemEval, setHoldemEval] = useState(null)
+
+  // État pour le filtre de jeu dans la liste des salons
+  const [gameFilter, setGameFilter] = useState('all')
 
   const wsRef = useRef(null)
   const reconnectRef = useRef({ attempts: 0, timer: null })
@@ -196,7 +199,7 @@ function App() {
     send('register', { name: pseudo })
   }
   const createRoom = () => send('create_room', { game: newGame })
-  const listRooms = (game) => send('list_rooms', { game: game || newGame })
+  const listRooms = () => send('list_rooms')
   const joinRoom = () => roomId.trim() && send('join_room', { roomId: roomId.trim() })
   const leaveRoom = () => {
     isLeavingRef.current = true;
@@ -236,13 +239,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Rafraîchir automatiquement la liste des salons à chaque changement de jeu sélectionné
+  // Rafraîchir automatiquement la liste des salons uniquement à la connexion
   useEffect(() => {
     if (status === 'connected') {
       listRooms();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newGame, status]);
+  }, [status]);
 
   useEffect(() => {
     // Calculer la probabilité de chaque joueur Hold'em via l'API PHP
@@ -272,10 +275,17 @@ function App() {
 
   // Re-inscription et rejoin automatique après reload
   useEffect(() => {
-    if (status === 'connected' && registeredName && roomId && !roomState && !isLeavingRef.current) {
+    if (
+      status === 'connected' &&
+      registeredName &&
+      roomId &&
+      !roomState &&
+      !isLeavingRef.current &&
+      newGame !== 'dnd5e' // Empêche la connexion auto pour DnD
+    ) {
       send('join_room', { roomId })
     }
-  }, [status, registeredName, roomId, roomState])
+  }, [status, registeredName, roomId, roomState, newGame])
 
   // Formulaire d'inscription
   const handleRegister = (e) => {
@@ -308,6 +318,7 @@ function App() {
   if (!registeredName) {
     return (
       <div className="register-form">
+        <h1>Univers Multijeux (prototype)</h1>
         <h2>Inscription</h2>
         <form onSubmit={handleRegister}>
           <input
@@ -328,45 +339,63 @@ function App() {
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Univers Multijeux : Cartes, Stratégie & Simulation en Ligne (prototype)</h1>
-        <div>
+{/*        <div>
           <span>Connecté en tant que <b>{registeredName}</b></span>
           <button onClick={handleUnregister} style={{marginLeft:8}}>Se désinscrire</button>
-        </div>
+        </div>*/}
       </div>
       <p>Status: {status} {connId ? `(id: ${connId})` : ''}</p>
       {status !== 'connected' && (<button onClick={connect}>Se connecter</button>)}
 
       {/* Panneau de gestion des salons : affiché uniquement si connecté et pas dans un salon */}
       {status === 'connected' && !roomState && (
-        <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
-          <h2>Salons</h2>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-            <label>Choisir jeu:&nbsp;
-              <select value={newGame} onChange={(e) => {
-                setNewGame(e.target.value);
-              }}>
-                <option value="tarot">Tarot</option>
-                <option value="belote">Belote</option>
-                <option value="holdem">Texas Hold'em</option>
-                <option value="dnd5e">DnD 5e</option>
-              </select>
-            </label>
-            <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
-            <input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ID du salon" />
-            <button onClick={joinRoom} disabled={status !== 'connected' || !roomId}>Rejoindre</button>
-          </div>
-          {rooms?.length > 0 && (
-            <ul>
-              {rooms.map(r => (
-                <li key={r.roomId}>
-                  <button onClick={() => setRoomId(r.roomId)}>Choisir</button>
-                  &nbsp;Salon {r.roomId} — jeu: {r.game || 'tarot'} — joueurs: {r.players} — statut: {r.status}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <>
+          {/* Formulaire de création de salon */}
+          <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12, marginBottom: 12 }}>
+            <h2>Créer un salon</h2>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label>Jeu&nbsp;:
+                <select value={newGame} onChange={e => setNewGame(e.target.value)}>
+                  <option value="tarot">Tarot</option>
+                  <option value="belote">Belote</option>
+                  <option value="holdem">Texas Hold'em</option>
+                  <option value="dnd5e">DnD 5e</option>
+                </select>
+              </label>
+              <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
+            </div>
+          </section>
+
+          {/* Liste des salons disponibles (indépendante du formulaire de création) */}
+          <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8 }}>
+            <h2>Salons disponibles</h2>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+              <input value={roomId} onChange={e => setRoomId(e.target.value)} placeholder="ID du salon" />
+              <button onClick={joinRoom} disabled={status !== 'connected' || !roomId || rooms.filter(r => gameFilter === 'all' || r.game === gameFilter).length === 0}>Rejoindre</button>
+              <label style={{marginLeft:16}}>Filtrer par jeu&nbsp;:
+                <select value={gameFilter} onChange={e => setGameFilter(e.target.value)}>
+                  <option value="all">Tous</option>
+                  <option value="tarot">Tarot</option>
+                  <option value="belote">Belote</option>
+                  <option value="holdem">Texas Hold'em</option>
+                  <option value="dnd5e">DnD 5e</option>
+                </select>
+              </label>
+            </div>
+            {rooms?.filter(r => gameFilter === 'all' || r.game === gameFilter).length > 0 ? (
+              <ul>
+                {rooms.filter(r => gameFilter === 'all' || r.game === gameFilter).map(r => (
+                  <li key={r.roomId}>
+                    <button onClick={() => setRoomId(r.roomId)}>Choisir</button>
+                    &nbsp;Salon {r.roomId} — jeu: {r.game || 'tarot'} — joueurs: {r.players} (min: {r.minPlayers}, max: {r.maxPlayers}) — statut: {r.status}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>Aucun salon disponible.</p>
+            )}
+          </section>
+        </>
       )}
 
       {/* Panneau du salon courant : affiché uniquement si dans un salon */}
@@ -381,7 +410,9 @@ function App() {
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id})
+                  {/* Affichage du pseudo uniquement, sans fallback Player#id ni id entre parenthèses */}
+                  {p.name}
+                    {/*<span style={{fontSize:'smaller',color:'#888'}}>{JSON.stringify(p)}</span>*/}
                   {roomState.game === 'dnd5e' && (
                     <span style={{fontWeight:'bold'}}> [{p.status === 'OK' ? 'OK' : 'DEAD'}]</span>
                   )}
@@ -500,7 +531,8 @@ function App() {
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {(roomState.players || []).map((p) => (
                       <li key={p.id} style={{ color: p.id === connId ? '#1976d2' : undefined }}>
-                        {p.name} (#{p.id}) :&nbsp;
+                        {/* Affichage du pseudo uniquement dans la liste Hold'em */}
+                        {p.name} :&nbsp;
                         {holdemEval && holdemEval.allWinProbs && typeof holdemEval.allWinProbs[p.id] !== 'undefined'
                           ? `${holdemEval.allWinProbs[p.id]} %`
                           : '—'}
@@ -527,7 +559,7 @@ function App() {
               <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <h3>DnD 5e — Arène</h3>
                 {roomState.status === 'waiting' && (
-                  <DnDMonsterSetup roomId={roomState.roomId} send={send} />
+                  <DnDMonsterSetup send={send} />
                 )}
                 {roomState.status === 'fighting' && (
                   <DnDCombatView roomState={roomState} connId={connId} send={send} />
@@ -613,7 +645,7 @@ function HoldemActions({ isYourTurn, playableInfo, onCheck, onCall, onBet, onRai
 }
 
 // Composant de configuration des monstres pour DnD
-function DnDMonsterSetup({ roomId, send }) {
+function DnDMonsterSetup({ send }) {
   const [monsters, setMonsters] = useState([
     { name: 'Gobelin', hp: 8, max_hp: 8, dmg: 3, ac: 13, cr: 1, dex: 14 },
     { name: 'Orc', hp: 15, max_hp: 15, dmg: 5, ac: 13, cr: 2, dex: 12 },
@@ -684,7 +716,7 @@ function DnDCombatView({ roomState, connId, send }) {
       {/* Inventaire du joueur connecté */}
       {myPlayer && (
         <div style={{ marginBottom: 8 }}>
-          <b>Inventaire :</b> Or : {myPlayer.gold ?? 0} — Potions : {myPlayer.potions ?? 0}
+          <b>{myPlayer.name}</b> — Niveau: {myPlayer.level ?? 1} — Or : {myPlayer.gold ?? 0} — Potions : {myPlayer.potions ?? 0}
           {canDrinkPotion && (
             <button style={{ marginLeft: 12 }} onClick={handleDrinkPotion}>Boire Potion (+10 PV)</button>
           )}
@@ -696,6 +728,7 @@ function DnDCombatView({ roomState, connId, send }) {
           <ul>
             {players.map(p => (
               <li key={p.id} style={{ color: p.status === 'Dead' ? 'red' : undefined }}>
+                {/* Affichage du pseudo uniquement dans la vue DnD */}
                 {p.name} (HP: {p.hp}/{p.max_hp}, Dégâts: {p.dmg}, AC: {p.ac}, Dex: {p.dex}) {p.status === 'Dead' && '💀'}
                 {turn === p.id && <b> ← Tour</b>}
               </li>
