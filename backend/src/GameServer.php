@@ -118,17 +118,8 @@ class GameServer implements MessageComponentInterface
                     $game = isset($payload['game']) ? (string)$payload['game'] : 'tarot';
                     $room = RoomFactory::create($game, $roomId);
                     $this->rooms[$roomId] = $room;
-                    if ($game === 'dnd5e') {
-                        // Ajout automatique du créateur au salon DnD
-                        $room->add($from, $client['name']);
-                        $client['roomId'] = $roomId;
-                        $this->clients[$from] = $client;
-                        $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
-                        $room->broadcast([ 'type' => 'room_update', 'payload' => $room->serializeState() ]);
-                    } else {
-                        // Comportement inchangé pour les autres jeux
-                        $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
-                    }
+                    // Suppression de l'ajout automatique pour DnD : le joueur doit cliquer sur 'Rejoindre' comme pour les autres jeux
+                    $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
                     break;
 
                 case 'join_room':
