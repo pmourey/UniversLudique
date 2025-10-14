@@ -30,7 +30,7 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ''),
-        configure: (proxy, options) => {
+        configure: (proxy) => {
           proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
             // Ajoute l'IP réelle du client dans le header X-Forwarded-For
             if (req.socket && req.socket.remoteAddress) {
@@ -47,7 +47,7 @@ export default defineConfig({
       },
       // Ajout du proxy pour le backend PHP
       '/backend': {
-        target: 'http://127.0.0.1:8000', // Serveur PHP HTTP
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false, // Doit être false car backend en HTTP
         selfHandleResponse: false,
