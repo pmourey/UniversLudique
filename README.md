@@ -1,7 +1,6 @@
-# Plateforme Multi-joueurs (au tour par tour)
+# UniversLudique
 
-Jeux de cartes : Tarot, Belote, Texas Hold'em  
-Jeux de simulation : DnD 5e
+Plateforme de jeux de cartes, de plateau et de rôle en ligne au tour par tour (Tarot, Belote, Texas Hold'em, DnD 5e)
 
 (Backend PHP + Frontend React)
 
@@ -101,6 +100,28 @@ php backend/bin/server.php   # écoute 0.0.0.0:8090
 3) Routeur/NAT:
 - Rediriger le port WAN → LAN 5173 vers `<IP_LAN>:5173`
 - Accès externe: `http://votre-domaine:5173` (WS passe via `/ws`)
+
+Exemple de configuration Nginx pour le proxy WebSocket:
+```nginx
+server {
+    listen 80;
+    server_name votre-domaine;
+
+    location / {
+        # Servir les fichiers statiques du frontend
+        root /chemin/vers/frontend/dist;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /ws {
+        # Proxy WebSocket vers le backend
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
 
 ## Déploiement (pistes)
 - Build frontend et servir statiquement (Nginx/Apache), proxy WebSocket → backend.
