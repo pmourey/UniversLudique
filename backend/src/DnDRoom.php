@@ -14,6 +14,8 @@ class DnDRoom extends Room implements GameRoom {
     public $turnIndex = 0;
     public $log = [];
     public $status = 'waiting'; // waiting | fighting | finished
+    private $minPlayers = 2;
+    private $maxPlayers = 6;
 
     public function __construct($roomId) {
         parent::__construct($roomId);
@@ -347,6 +349,7 @@ class DnDRoom extends Room implements GameRoom {
             'game' => $this->game,
             'players' => count($this->dndPlayers),
             'status' => $this->status,
+            'minPlayers' => $this->minPlayers,
         ];
     }
     public function startGame() {

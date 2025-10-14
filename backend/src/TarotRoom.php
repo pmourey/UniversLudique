@@ -29,6 +29,9 @@ class TarotRoom implements GameRoom
     private $won = array(); // id => array of won cards
     private $tricksWon = array(); // id => int
 
+    private $minPlayers = 3;
+    private $maxPlayers = 5;
+
     public function __construct($id, $name = '')
     {
         $this->id = (string)$id;
@@ -40,9 +43,12 @@ class TarotRoom implements GameRoom
 
     public function add(ConnectionInterface $conn, $name)
     {
+        if (!$name) {
+            throw new \InvalidArgumentException('Un pseudo est requis pour rejoindre la partie.');
+        }
         $info = array(
             'id' => $conn->resourceId,
-            'name' => $name ? (string)$name : ('Player#' . $conn->resourceId),
+            'name' => (string)$name,
             'seat' => count($this->seats),
         );
         $this->players[$conn] = $info;
@@ -56,7 +62,6 @@ class TarotRoom implements GameRoom
             ),
         ));
         $this->broadcastState();
-        $this->sendPrivateStates();
     }
 
     public function remove(ConnectionInterface $conn)
@@ -126,6 +131,8 @@ class TarotRoom implements GameRoom
             'game' => $this->game,
             'players' => count($this->seats),
             'status' => $this->status,
+            'minPlayers' => $this->minPlayers,
+            'maxPlayers' => $this->maxPlayers,
         ];
     }
 

@@ -38,9 +38,12 @@ class Room
 
     public function add(ConnectionInterface $conn, $name)
     {
+//        if (!$name) {
+//            throw new \InvalidArgumentException('Un pseudo est requis pour rejoindre la partie.');
+//        }
         $info = array(
             'id' => $conn->resourceId,
-            'name' => $name ? (string)$name : ('Player#' . $conn->resourceId),
+            'name' => (string)$name,
             'seat' => count($this->seats),
         );
         $this->players[$conn] = $info;
@@ -48,10 +51,7 @@ class Room
         $this->rebuildOrder();
         $this->broadcast(array(
             'type' => 'player_joined',
-            'payload' => array(
-                'roomId' => $this->id,
-                'player' => $info,
-            ),
+            'payload' => array('roomId' => $this->id, 'player' => $info),
         ));
         $this->broadcastState();
         $this->sendPrivateStates();

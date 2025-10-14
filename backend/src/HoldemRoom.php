@@ -39,6 +39,9 @@ class HoldemRoom implements GameRoom
     private $communityRevealed = 0; // 0,3,4,5
     private $name = '';
 
+    private $minPlayers = 2;
+    private $maxPlayers = 9;
+
     public function __construct($id, $name = '')
     {
         $this->id = (string)$id;
@@ -52,7 +55,7 @@ class HoldemRoom implements GameRoom
     {
         $info = array(
             'id' => $conn->resourceId,
-            'name' => $name ? (string)$name : ('Player#' . $conn->resourceId),
+            'name' => (string)$name,
             'seat' => count($this->seats),
         );
         $this->players[$conn] = $info;
@@ -118,6 +121,8 @@ class HoldemRoom implements GameRoom
             'game' => $this->game,
             'players' => count($this->seats),
             'status' => $this->status,
+            'minPlayers' => $this->minPlayers,
+            'maxPlayers' => $this->maxPlayers,
         ];
     }
 
