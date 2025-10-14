@@ -2,16 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const DEFAULT_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
-const WS_URL = import.meta.env.VITE_WS_URL || DEFAULT_WS
+const WS_URL = DEFAULT_WS
+// console.log('WebSocket URL utilisée :', WS_URL)
+
+// Helpers persistance localStorage
+const LS_NAME = 'tarot_name'
+const LS_REGISTERED = 'tarot_registeredName'
+const LS_ROOMID = 'tarot_roomId'
 
 function App() {
+  // Initialisation depuis localStorage
+  const [name, setName] = useState(() => localStorage.getItem(LS_NAME) || '')
+  const [registeredName, setRegisteredName] = useState(() => localStorage.getItem(LS_REGISTERED) || null)
+  const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOMID) || '')
   const [status, setStatus] = useState('disconnected') // disconnected | connecting | connected
   const [connId, setConnId] = useState(null)
-  const [name, setName] = useState('')
-  const [registeredName, setRegisteredName] = useState(null)
 
   const [rooms, setRooms] = useState([])
-  const [roomId, setRoomId] = useState('')
   const [roomState, setRoomState] = useState(null)
 
   const [messages, setMessages] = useState([])
@@ -30,8 +37,11 @@ function App() {
 
   const wsRef = useRef(null)
   const reconnectRef = useRef({ attempts: 0, timer: null })
+  const unregisteringRef = useRef(false)
+  const isLeavingRef = useRef(false)
 
   const scheduleReconnect = () => {
+    if (unregisteringRef.current) return;
     const { attempts, timer } = reconnectRef.current
     if (timer) return
     const delay = Math.min(1000 * Math.pow(2, attempts), 10000)
@@ -61,8 +71,7 @@ function App() {
       wsNew.onopen = () => {
         clearReconnect()
         setStatus('connected')
-        // Nouveau: on considère la connexion comme neuve → le nom enregistré n’est plus valide côté serveur
-        setRegisteredName(null)
+        // SUPPRIMÉ : ne pas remettre setRegisteredName(null) ici
       }
 
       wsNew.onclose = () => {
@@ -96,6 +105,9 @@ function App() {
     ws.send(JSON.stringify({ type, payload }))
   }
 
+  // Ajout d'un état pour l'erreur d'inscription
+  const [registerError, setRegisterError] = useState('')
+
   const handleMessage = (msg) => {
     switch (msg.type) {
       case 'welcome':
@@ -103,6 +115,20 @@ function App() {
         break
       case 'registered':
         setRegisteredName(msg.payload?.name || null)
+        setRegisterError('')
+        break
+      case 'unregistered':
+        setRegisteredName(null)
+        setName('')
+        setRoomId('')
+        setRoomState(null)
+        setHand([])
+        setDiscardSel([])
+        setPlayable([])
+        localStorage.removeItem(LS_NAME)
+        localStorage.removeItem(LS_REGISTERED)
+        localStorage.removeItem(LS_ROOMID)
+        setRegisterError('')
         break
       case 'rooms':
         setRooms(msg.payload || [])
@@ -127,6 +153,7 @@ function App() {
         setHand([])
         setDiscardSel([])
         setPlayable([])
+        localStorage.removeItem(LS_ROOMID)
         break
       case 'chat':
         setMessages((prev) => [...prev, msg.payload])
@@ -147,6 +174,13 @@ function App() {
         setPlayable(msg.payload?.playable || msg.payload?.allowed || [])
         break
       case 'error':
+        if (msg.payload?.message?.includes('déjà utilisé')) {
+          setRegisterError(msg.payload.message)
+          setRegisteredName(null)
+          setName('')
+          localStorage.removeItem(LS_NAME)
+          localStorage.removeItem(LS_REGISTERED)
+        }
         alert(msg.payload?.message || 'Erreur')
         break
       case 'hand_evaluation':
@@ -158,11 +192,16 @@ function App() {
   }
 
   // Actions jeu
-  const doRegister = () => name.trim() && send('register', { name: name.trim() })
+  const doRegister = (pseudo) => {
+    send('register', { name: pseudo })
+  }
   const createRoom = () => send('create_room', { game: newGame })
   const listRooms = (game) => send('list_rooms', { game: game || newGame })
   const joinRoom = () => roomId.trim() && send('join_room', { roomId: roomId.trim() })
-  const leaveRoom = () => send('leave_room')
+  const leaveRoom = () => {
+    isLeavingRef.current = true;
+    send('leave_room')
+  }
   const startGame = () => send('start_game')
   const restartDeal = () => send('action', { action: 'restart' })
   const finishDeal = () => send('action', { action: 'finish' })
@@ -223,70 +262,130 @@ function App() {
     roomState?.game === 'holdem' ? (holdemEligibleCount >= 2) : true
   )
 
-  // Pour DnD5e : bouton actif si status 'waiting' ou 'finished' et il y a au moins un joueur et un monstre
-  const canStartDnD = roomState?.game === 'dnd5e' &&
-    (roomState.status === 'waiting' || roomState.status === 'finished') &&
-    (roomState.players?.length > 0) && (roomState.monsters?.length > 0)
-
   // Bouton "Terminer la donne" : actif si tous les joueurs n'ont plus de cartes en main (pour Tarot/Belote)
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
 
+  // Persistance localStorage : nom, nom enregistré, salon courant
+  useEffect(() => { localStorage.setItem(LS_NAME, name) }, [name])
+  useEffect(() => { if (registeredName) localStorage.setItem(LS_REGISTERED, registeredName); else localStorage.removeItem(LS_REGISTERED) }, [registeredName])
+  useEffect(() => { localStorage.setItem(LS_ROOMID, roomId) }, [roomId])
+
+  // Re-inscription et rejoin automatique après reload
+  useEffect(() => {
+    if (status === 'connected' && registeredName && roomId && !roomState && !isLeavingRef.current) {
+      send('join_room', { roomId })
+    }
+  }, [status, registeredName, roomId, roomState])
+
+  // Formulaire d'inscription
+  const handleRegister = (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setRegisterError('')
+    doRegister(name.trim())
+  }
+
+  // Désinscription
+  const handleUnregister = () => {
+    unregisteringRef.current = true;
+    send('unregister')
+    setRegisteredName(null)
+    setName('')
+    localStorage.removeItem(LS_NAME)
+    localStorage.removeItem(LS_REGISTERED)
+    setRegisterError('')
+    if (wsRef.current) {
+      wsRef.current.close()
+    }
+    // Relancer la connexion WebSocket après un court délai pour garantir la fermeture
+    setTimeout(() => {
+      unregisteringRef.current = false;
+      connect();
+    }, 300);
+  }
+
+  // Rendu du formulaire d'inscription si pas de pseudo enregistré
+  if (!registeredName) {
+    return (
+      <div className="register-form">
+        <h2>Inscription</h2>
+        <form onSubmit={handleRegister}>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Entrez votre pseudo"
+            autoFocus
+          />
+          <button type="submit">S'inscrire</button>
+        </form>
+        {registerError && <div className="error" style={{color:'red'}}>{registerError}</div>}
+      </div>
+    )
+  }
+
+  // Affichage principal après inscription
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: 16 }}>
-      <h1>Jeux de cartes multi-joueurs (prototype)</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Univers Multijeux : Cartes, Stratégie & Simulation en Ligne (prototype)</h1>
+        <div>
+          <span>Connecté en tant que <b>{registeredName}</b></span>
+          <button onClick={handleUnregister} style={{marginLeft:8}}>Se désinscrire</button>
+        </div>
+      </div>
       <p>Status: {status} {connId ? `(id: ${connId})` : ''}</p>
       {status !== 'connected' && (<button onClick={connect}>Se connecter</button>)}
 
-      <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
-        <h2>Inscription</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Votre pseudo" />
-          <button onClick={doRegister} disabled={!name || status !== 'connected'}>S'inscrire</button>
-          {registeredName && <span>Inscrit comme: <b>{registeredName}</b></span>}
-        </div>
-      </section>
+      {/* Panneau de gestion des salons : affiché uniquement si connecté et pas dans un salon */}
+      {status === 'connected' && !roomState && (
+        <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
+          <h2>Salons</h2>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <label>Choisir jeu:&nbsp;
+              <select value={newGame} onChange={(e) => {
+                setNewGame(e.target.value);
+              }}>
+                <option value="tarot">Tarot</option>
+                <option value="belote">Belote</option>
+                <option value="holdem">Texas Hold'em</option>
+                <option value="dnd5e">DnD 5e</option>
+              </select>
+            </label>
+            <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
+            <input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ID du salon" />
+            <button onClick={joinRoom} disabled={status !== 'connected' || !roomId}>Rejoindre</button>
+          </div>
+          {rooms?.length > 0 && (
+            <ul>
+              {rooms.map(r => (
+                <li key={r.roomId}>
+                  <button onClick={() => setRoomId(r.roomId)}>Choisir</button>
+                  &nbsp;Salon {r.roomId} — jeu: {r.game || 'tarot'} — joueurs: {r.players} — statut: {r.status}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
-      <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
-        <h2>Salons</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-          <label>Choisir jeu:&nbsp;
-            <select value={newGame} onChange={(e) => {
-              setNewGame(e.target.value);
-              // listRooms(); // SUPPRIMÉ : le rafraîchissement est maintenant dans useEffect
-            }}>
-              <option value="tarot">Tarot</option>
-              <option value="belote">Belote</option>
-              <option value="holdem">Texas Hold'em</option>
-              <option value="dnd5e">DnD 5e</option>
-            </select>
-          </label>
-          <button onClick={createRoom} disabled={status !== 'connected'}>Créer un salon</button>
-          <input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ID du salon" />
-          <button onClick={joinRoom} disabled={status !== 'connected' || !roomId}>Rejoindre</button>
-          <button onClick={leaveRoom} disabled={!roomState}>Quitter</button>
-        </div>
-        {rooms?.length > 0 && (
-          <ul>
-            {rooms.map(r => (
-              <li key={r.roomId}>
-                <button onClick={() => setRoomId(r.roomId)}>Choisir</button>
-                &nbsp;Salon {r.roomId} — jeu: {r.game || 'tarot'} — joueurs: {r.players} — statut: {r.status}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
-        <h2>Salon courant</h2>
-        {roomState ? (
+      {/* Panneau du salon courant : affiché uniquement si dans un salon */}
+      {roomState && (
+        <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
+          <h2>Salon courant</h2>
+          <button onClick={leaveRoom} style={{marginBottom: 12}}>Quitter le salon</button>
+          {/* Le bouton Quitter est affiché pour tous les jeux */}
           <div>
             <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'} {roomState.game === 'belote' && roomState.trumpSuit ? `— Atout: ${roomState.trumpSuit}` : ''}</p>
             <p>Joueurs (ordre):</p>
             <ul>
               {(roomState.players || []).map(p => (
                 <li key={p.id}>
-                  {p.name} (#{p.id}) <span style={{fontWeight:'bold'}}>[{p.status === 'OK' ? 'OK' : 'DEAD'}]</span> {p.team !== undefined ? `(équipe ${p.team})` : ''}
+                  {p.name} (#{p.id})
+                  {roomState.game === 'dnd5e' && (
+                    <span style={{fontWeight:'bold'}}> [{p.status === 'OK' ? 'OK' : 'DEAD'}]</span>
+                  )}
+                  {p.team !== undefined ? ` (équipe ${p.team})` : ''}
                   {roomState.game === 'holdem' ? (
                     <> — stack: {p.stack ?? '—'} — mise: {p.bet ?? 0} {p.folded ? '(couché)' : ''} {p.allin ? '(all-in)' : ''} {roomState.currentPlayerId === p.id ? '⬅️ Tour' : ''}</>
                   ) : roomState.game === 'dnd5e' ? (
@@ -445,31 +544,36 @@ function App() {
               </div>
             )}
           </div>
-        ) : (
-          <p>Aucun salon rejoint.</p>
-        )}
-      </section>
+          {/* Panneau de chat intégré dans le salon courant */}
+          <section style={{ border: '1px solid #eee', padding: 12, borderRadius: 8, marginTop: 16 }}>
+            <h2>Chat</h2>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #eee', padding: 8, borderRadius: 4 }}>
+              {messages.map((m, i) => (
+                <div key={i}><b>{m.from}:</b> {m.text}</div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Message" />
+              <button onClick={sendChat} disabled={!roomState}>Envoyer</button>
+            </div>
+          </section>
+        </section>
+      )}
 
-      <section style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8, marginTop: 12 }}>
-        <h2>Chat</h2>
-        <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #eee', padding: 8, borderRadius: 4 }}>
-          {messages.map((m, i) => (
-            <div key={i}><b>{m.from}:</b> {m.text}</div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Message" />
-          <button onClick={sendChat} disabled={!roomState}>Envoyer</button>
-        </div>
-      </section>
+      {/* Le panneau de chat global n'est plus affiché hors salon */}
 
-      {holdemEval && (
+      {holdemEval && roomState && (
         <div className="holdem-eval">
           <div>Phase : <b>{holdemEval.round}</b></div>
           <div>Probabilité de gagner : <b>{(holdemEval.winProb !== undefined && holdemEval.winProb !== '—') ? holdemEval.winProb + ' %' : '—'}</b></div>
           <div>Rang de la main : <b>{holdemEval.rank}</b></div>
         </div>
       )}
+
+      <div style={{float:'right'}}>
+        <span>Connecté en tant que <b>{registeredName}</b></span>
+        <button onClick={handleUnregister} style={{marginLeft:8}}>Se désinscrire</button>
+      </div>
 
       <p style={{ marginTop: 16, fontSize: 12, color: '#666' }}>WS: {WS_URL}</p>
     </div>
@@ -526,18 +630,34 @@ function DnDMonsterSetup({ roomId, send }) {
   return (
     <div>
       <h4>Configuration des monstres</h4>
-      {monsters.map((m, i) => (
-        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
-          <input value={m.name} onChange={e => handleChange(i, 'name', e.target.value)} placeholder="Nom" style={{ width: 80 }} />
-          <input type="number" value={m.hp} onChange={e => handleChange(i, 'hp', +e.target.value)} placeholder="HP" style={{ width: 50 }} />
-          <input type="number" value={m.max_hp} onChange={e => handleChange(i, 'max_hp', +e.target.value)} placeholder="Max HP" style={{ width: 60 }} />
-          <input type="number" value={m.dmg} onChange={e => handleChange(i, 'dmg', +e.target.value)} placeholder="Dégâts" style={{ width: 60 }} />
-          <input type="number" value={m.ac} onChange={e => handleChange(i, 'ac', +e.target.value)} placeholder="AC" style={{ width: 40 }} />
-          <input type="number" value={m.cr} onChange={e => handleChange(i, 'cr', +e.target.value)} placeholder="CR" style={{ width: 40 }} />
-          <input type="number" value={m.dex} onChange={e => handleChange(i, 'dex', +e.target.value)} placeholder="Dex" style={{ width: 40 }} />
-          <button onClick={() => removeMonster(i)} disabled={monsters.length <= 1}>Suppr</button>
-        </div>
-      ))}
+      <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
+        <thead>
+          <tr>
+            <th style={{ width: 80, textAlign: 'left', padding: 2 }}>Nom</th>
+            <th style={{ width: 50, textAlign: 'left', padding: 2 }}>HP</th>
+            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Max HP</th>
+            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Dégâts</th>
+            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>AC</th>
+            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>CR</th>
+            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>Dex</th>
+            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {monsters.map((m, i) => (
+            <tr key={i}>
+              <td style={{ padding: 2 }}><input value={m.name} onChange={e => handleChange(i, 'name', e.target.value)} placeholder="Nom" style={{ width: 70 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.hp} onChange={e => handleChange(i, 'hp', +e.target.value)} placeholder="HP" style={{ width: 40 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.max_hp} onChange={e => handleChange(i, 'max_hp', +e.target.value)} placeholder="Max HP" style={{ width: 50 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.dmg} onChange={e => handleChange(i, 'dmg', +e.target.value)} placeholder="Dégâts" style={{ width: 50 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.ac} onChange={e => handleChange(i, 'ac', +e.target.value)} placeholder="AC" style={{ width: 30 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.cr} onChange={e => handleChange(i, 'cr', +e.target.value)} placeholder="CR" style={{ width: 30 }} /></td>
+              <td style={{ padding: 2 }}><input type="number" value={m.dex} onChange={e => handleChange(i, 'dex', +e.target.value)} placeholder="Dex" style={{ width: 30 }} /></td>
+              <td style={{ padding: 2 }}><button onClick={() => removeMonster(i)} disabled={monsters.length <= 1}>Suppr</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       <button onClick={addMonster}>Ajouter un monstre</button>
       <button onClick={submit} style={{ marginLeft: 8 }}>Lancer le combat</button>
     </div>

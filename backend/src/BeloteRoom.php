@@ -497,4 +497,8 @@ class BeloteRoom implements GameRoom
         usort($tmp, function($a,$b){ return ($a['seat'] - $b['seat']); });
         $this->order = array_map(function($p){ return $p['id']; }, $tmp);
     }
+
+    public function getGameType() {
+        return $this->game;
+    }
 }

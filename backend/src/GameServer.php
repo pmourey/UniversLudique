@@ -88,9 +88,29 @@ class GameServer implements MessageComponentInterface
                     if ($name === '') {
                         throw new \InvalidArgumentException('Name required');
                     }
+                    // Vérifier unicité du pseudo
+                    foreach ($this->clients as $c) {
+                        if (isset($this->clients[$c]['name']) && $this->clients[$c]['name'] === $name && $from !== $c) {
+                            $this->send($from, [ 'type' => 'error', 'payload' => [ 'message' => 'Ce pseudo est déjà utilisé.' ] ]);
+                            return;
+                        }
+                    }
                     $client['name'] = $name;
                     $this->clients[$from] = $client; // persist change
                     $this->send($from, [ 'type' => 'registered', 'payload' => [ 'name' => $name ] ]);
+                    break;
+
+                case 'unregister':
+                    // Retirer le joueur de tous les salons où il est inscrit
+                    foreach ($this->rooms as $room) {
+                        if (method_exists($room, 'remove')) {
+                            $room->remove($from);
+                        }
+                    }
+                    $client['name'] = null;
+                    $client['roomId'] = null;
+                    $this->clients[$from] = $client;
+                    $this->send($from, [ 'type' => 'unregistered', 'payload' => [] ]);
                     break;
 
                 case 'create_room':
@@ -98,10 +118,17 @@ class GameServer implements MessageComponentInterface
                     $game = isset($payload['game']) ? (string)$payload['game'] : 'tarot';
                     $room = RoomFactory::create($game, $roomId);
                     $this->rooms[$roomId] = $room;
-                    // Ne pas ajouter le créateur au salon automatiquement
-                    // Ne pas attribuer roomId au client
-                    // Ne pas envoyer 'room_joined' ici
-                    $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
+                    if ($game === 'dnd5e') {
+                        // Ajout automatique du créateur au salon DnD
+                        $room->add($from, $client['name']);
+                        $client['roomId'] = $roomId;
+                        $this->clients[$from] = $client;
+                        $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
+                        $room->broadcast([ 'type' => 'room_update', 'payload' => $room->serializeState() ]);
+                    } else {
+                        // Comportement inchangé pour les autres jeux
+                        $this->send($from, [ 'type' => 'room_created', 'payload' => [ 'roomId' => $roomId, 'game' => $game ] ]);
+                    }
                     break;
 
                 case 'join_room':
@@ -110,6 +137,40 @@ class GameServer implements MessageComponentInterface
                         throw new \InvalidArgumentException('Room not found');
                     }
                     $room = $this->rooms[$roomId];
+                    $playerName = $client['name'];
+                    // Récupérer le type de jeu du salon cible
+                    $targetGameType = method_exists($room, 'getGameType') ? $room->getGameType() : null;
+                    // Vérifier si le joueur est déjà inscrit dans un autre salon du même type de jeu
+                    $alreadyInRoom = false;
+                    foreach ($this->rooms as $rid => $r) {
+                        if ($rid === $roomId) continue;
+                        $gameType = method_exists($r, 'getGameType') ? $r->getGameType() : null;
+                        if ($gameType !== $targetGameType) continue;
+                        if (method_exists($r, 'serializeState')) {
+                            $state = $r->serializeState();
+                            if (isset($state['players'])) {
+                                foreach ($state['players'] as $p) {
+                                    if ((isset($p['name']) && $p['name'] === $playerName) || (isset($p['id']) && $p['id'] === $from->resourceId)) {
+                                        $alreadyInRoom = true;
+                                        break 3;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if ($alreadyInRoom) {
+                        $this->send($from, [
+                            'type' => 'error',
+                            'payload' => [
+                                'message' => 'Vous êtes déjà inscrit dans un autre salon de ce jeu. Quittez-le avant de rejoindre un nouveau salon.'
+                            ]
+                        ]);
+                        break;
+                    }
+                    // S'assurer que le client n'a plus d'ancien roomId
+                    $client['roomId'] = null;
+                    $this->clients[$from] = $client;
+                    // Ajouter au nouveau salon
                     $room->add($from, $client['name']);
                     $client['roomId'] = $roomId;
                     $this->clients[$from] = $client;
@@ -122,11 +183,12 @@ class GameServer implements MessageComponentInterface
                         $room = isset($this->rooms[$roomId]) ? $this->rooms[$roomId] : null;
                         if ($room) {
                             $room->remove($from);
-                            if ($room->isEmpty()) {
-                                unset($this->rooms[$roomId]);
-                            } else {
+                            // Désactiver la suppression automatique du salon
+                            // if ($room->isEmpty()) {
+                            //     unset($this->rooms[$roomId]);
+                            // } else {
                                 $room->broadcast([ 'type' => 'room_update', 'payload' => $room->serializeState() ]);
-                            }
+                            // }
                         }
                         $client['roomId'] = null;
                         $this->clients[$from] = $client;
@@ -197,11 +259,12 @@ class GameServer implements MessageComponentInterface
             if ($roomId && isset($this->rooms[$roomId])) {
                 $room = $this->rooms[$roomId];
                 $room->remove($conn);
-                if ($room->isEmpty()) {
-                    unset($this->rooms[$roomId]);
-                } else {
+                // Désactiver la suppression automatique du salon
+                // if ($room->isEmpty()) {
+                //     unset($this->rooms[$roomId]);
+                // } else {
                     $room->broadcast([ 'type' => 'room_update', 'payload' => $room->serializeState() ]);
-                }
+                // }
             }
             unset($this->clients[$conn]);
         }

@@ -19,7 +19,7 @@ class TarotRoom implements GameRoom
     private $order = array(); // ordered list of player ids (by seats)
     private $hands = array(); // id => array of cards (strings)
     private $dog = array();
-    private $bids = array(); // id => bid string ('pass','prise','garde','garde_sans','garde_contre')
+    private $bids = array(); // id => bid string ('pass','prise','garde','garde_sans'|'garde_contre')
     private $currentTurnIndex = 0; // index in $order
     private $takerId = null;
     private $highestBid = null; // null|'prise'|'garde'|'garde_sans'|'garde_contre'
@@ -563,6 +563,10 @@ class TarotRoom implements GameRoom
             if ($p['id'] === $id) return $p['name'];
         }
         return (string)$id;
+    }
+
+    public function getGameType() {
+        return $this->game;
     }
 }
 

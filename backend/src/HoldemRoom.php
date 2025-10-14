@@ -848,4 +848,8 @@ class HoldemRoom implements GameRoom
             ]));
         }
     }
+
+    public function getGameType() {
+        return $this->game;
+    }
 }

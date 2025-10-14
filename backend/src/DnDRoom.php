@@ -27,6 +27,10 @@ class DnDRoom extends Room implements GameRoom {
     }
 
     public function addPlayer($player) {
+        // Empêcher l'ajout d'un joueur mort
+        if (isset($player['status']) && $player['status'] === 'Dead') {
+            return;
+        }
         $player['level'] = 1;
         $player['xp'] = 0; // Ajout XP
         $player['hp'] = $player['max_hp'] = 20;
@@ -67,6 +71,12 @@ class DnDRoom extends Room implements GameRoom {
     }
 
     public function startCombat() {
+        // Retirer les joueurs morts de l'ordre d'initiative
+        foreach ($this->dndPlayers as $id => $p) {
+            if ($p['status'] === 'Dead') {
+                unset($this->dndPlayers[$id]);
+            }
+        }
         $this->status = 'fighting';
         $this->rollInitiative();
         $this->turnIndex = 0;
@@ -256,7 +266,7 @@ class DnDRoom extends Room implements GameRoom {
                 $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
                 break;
             case 'drink_potion':
-                $playerId = $from->resourceId;
+                $playerId = $from->{'resourceId'};
                 if (isset($this->dndPlayers[$playerId]) && $this->dndPlayers[$playerId]['potions'] > 0) {
                     $heal = 10; // Valeur fixe ou calculée selon CR
                     $this->dndPlayers[$playerId]['potions'] -= 1;
@@ -292,7 +302,7 @@ class DnDRoom extends Room implements GameRoom {
         // Appel de la logique parente (ajout dans SplObjectStorage)
         parent::add($conn, $name);
         // Ajout dans le tableau $this->players pour DnD
-        $playerId = $conn->resourceId;
+        $playerId = $conn->{'resourceId'};
         $player = [
             'id' => $playerId,
             'name' => $name ? (string)$name : ('Player#' . $playerId),
@@ -301,6 +311,24 @@ class DnDRoom extends Room implements GameRoom {
     }
     public function remove(ConnectionInterface $conn) {
         parent::remove($conn);
+        $playerId = $conn->{'resourceId'};
+        // Supprimer le joueur du tableau dndPlayers
+        if (isset($this->dndPlayers[$playerId])) {
+            unset($this->dndPlayers[$playerId]);
+        }
+        // Supprimer le joueur de l'ordre d'initiative si présent
+        $this->initiativeOrder = array_values(array_filter(
+            $this->initiativeOrder,
+            function($entity) use ($playerId) {
+                return !($entity['type'] === 'player' && $entity['id'] == $playerId);
+            }
+        ));
+        // Si le joueur quittant était le tour courant, avancer le tour
+        if (isset($this->initiativeOrder[$this->turnIndex]) && $this->initiativeOrder[$this->turnIndex]['id'] == $playerId) {
+            $this->turnIndex = $this->turnIndex % max(1, count($this->initiativeOrder));
+        }
+        // Diffuser l'état mis à jour
+        $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
     }
     public function isEmpty() {
         return parent::isEmpty();
@@ -346,5 +374,8 @@ class DnDRoom extends Room implements GameRoom {
                 $p['potions'] += $potionsPerPlayer;
             }
         }
+    }
+    public function getGameType() {
+        return $this->game;
     }
 }
