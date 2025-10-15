@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
+import TarotGamePanel from './TarotGamePanel'
+import BeloteGamePanel from './BeloteGamePanel'
+import HoldemGamePanel from './HoldemGamePanel'
+import DnDGamePanel from './DnDGamePanel'
 
 const DEFAULT_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
 const WS_URL = DEFAULT_WS
@@ -565,9 +569,7 @@ function App() {
               <ul>
                 {(roomState.players || []).map(p => (
                   <li key={p.id}>
-                    {/* Affichage du pseudo uniquement, sans fallback Player#id ni id entre parenthèses */}
                     {p.name}
-                      {/*<span style={{fontSize:'smaller',color:'#888'}}>{JSON.stringify(p)}</span>*/}
                     {roomState.game === 'dnd5e' && (
                       <span style={{fontWeight:'bold'}}> [{p.status === 'OK' ? 'OK' : 'DEAD'}]</span>
                     )}
@@ -594,154 +596,57 @@ function App() {
                 <button style={{ marginLeft: 8 }} onClick={() => { const key = registeredName || name; if (key) { const v = loadJetonsFor(key); setJetons(v); setConversionMsg('Jetons restaurés depuis localStorage'); } }}>Restaurer depuis localStorage</button>
               </div>
               {/* Tarot */}
-              {roomState.game === 'tarot' && roomState.status === 'bidding' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Enchères</h3>
-                  <p>{isYourTurn ? 'À vous de parler.' : 'En attente...'}</p>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button disabled={!isYourTurn} onClick={() => placeBid('pass')}>Passer</button>
-                    <button disabled={!isYourTurn} onClick={() => placeBid('prise')}>Prise</button>
-                    <button disabled={!isYourTurn} onClick={() => placeBid('garde')}>Garde</button>
-                    <button disabled={!isYourTurn} onClick={() => placeBid('garde_sans')}>Garde sans</button>
-                    <button disabled={!isYourTurn} onClick={() => placeBid('garde_contre')}>Garde contre</button>
-                  </div>
-                  <p>Meilleure enchère: <b>{roomState.highestBid || '—'}</b> — Preneur: {roomState.takerId ?? '—'}</p>
-                </div>
-              )}
-              {roomState.game === 'tarot' && roomState.status === 'discarding' && youAreTaker && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Écart</h3>
-                  <p>Sélectionnez {discardTarget()} cartes à écarter</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {hand.map((c) => (
-                      <button key={c} onClick={() => toggleDiscard(c)} style={{ border: discardSel.includes(c) ? '2px solid red' : '1px solid #ccc' }}>{c}</button>
-                    ))}
-                  </div>
-                  <button onClick={submitDiscard} disabled={discardSel.length !== discardTarget()}>Valider l'écart</button>
-                </div>
-              )}
-              {roomState.game === 'tarot' && roomState.status === 'playing' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Jeu des cartes</h3>
-                  <p>{isYourTurn ? 'À vous de jouer' : 'En attente...'}</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {hand.map((c) => (
-                      <button key={c} onClick={() => isYourTurn && playCard(c)} disabled={!isYourTurn}>{c}</button>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <b>Pli en cours:</b> {(roomState.trick || []).map((t, i) => (
-                      <span key={i} style={{ marginRight: 8 }}>{t.playerId}:{t.card}</span>
-                    ))}
-                  </div>
-                </div>
+              {roomState.game === 'tarot' && (
+                <TarotGamePanel
+                  roomState={roomState}
+                  isYourTurn={isYourTurn}
+                  hand={hand}
+                  placeBid={placeBid}
+                  playCard={playCard}
+                  discardSel={discardSel}
+                  toggleDiscard={toggleDiscard}
+                  submitDiscard={submitDiscard}
+                />
               )}
               {/* Belote */}
-              {roomState.game === 'belote' && roomState.status === 'choosing_trump' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Choix de l'atout (Belote)</h3>
-                  <p>{isYourTurn ? 'À vous de choisir l\'atout' : 'En attente...'}</p>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {['S','H','D','C'].map(s => (
-                      <button key={s} disabled={!isYourTurn} onClick={() => chooseTrump(s)}>{s}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {roomState.game === 'belote' && roomState.status === 'playing' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Jeu des cartes (Belote) — Atout: {roomState.trumpSuit || '—'}</h3>
-                  <p>{isYourTurn ? 'À vous de jouer' : 'En attente...'}</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {hand.map((c) => {
-                      const canPlay = !isYourTurn ? false : (playable.length === 0 || playable.includes(c))
-                      return (
-                        <button key={c} onClick={() => isYourTurn && canPlay && playCard(c)} disabled={!canPlay}>{c}</button>
-                      )
-                    })}
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <b>Pli en cours:</b> {(roomState.trick || []).map((t, i) => (
-                      <span key={i} style={{ marginRight: 8 }}>{t.playerId}:{t.card}</span>
-                    ))}
-                  </div>
-                </div>
+              {roomState.game === 'belote' && (
+                <BeloteGamePanel
+                  roomState={roomState}
+                  isYourTurn={isYourTurn}
+                  hand={hand}
+                  playable={playable}
+                  playCard={playCard}
+                  chooseTrump={chooseTrump}
+                />
               )}
               {/* Hold'em */}
               {roomState.game === 'holdem' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>Texas Hold'em</h3>
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                    <div>
-                      <b>Cartes communes:</b> {(roomState.community || []).length > 0 ? (
-                        <span> {(roomState.community || []).join(' ')}</span>
-                      ) : (
-                        <span> —</span>
-                      )}
-                    </div>
-                    <div>
-                      <b>Pot:</b> {roomState.potTotal ?? 0}
-                    </div>
-                    <div>
-                      <b>Blinds:</b> {roomState.smallBlind ?? 0}/{roomState.bigBlind ?? 0}
-                    </div>
-                  </div>
-                  {/* Affichage des probabilités de victoire pour chaque joueur (backend) */}
-                  <div style={{ marginTop: 8 }}>
-                    <b>Probabilité de gagner (calcul backend) :</b>
-                    <ul style={{ margin: 0, paddingLeft: 20 }}>
-                      {(roomState.players || []).map((p) => (
-                        <li key={p.id} style={{ color: p.id === connId ? '#1976d2' : undefined }}>
-                          {/* Affichage du pseudo uniquement dans la liste Hold'em */}
-                          {p.name} :&nbsp;
-                          {holdemEval && holdemEval.allWinProbs && typeof holdemEval.allWinProbs[p.id] !== 'undefined'
-                            ? `${holdemEval.allWinProbs[p.id]} %`
-                            : '—'}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <b>Votre main:</b> {hand.length > 0 ? hand.join(' ') : '—'}
-                    {roomState.game === 'holdem' && (
-                      <> — <b>Votre tapis:</b> {(playersArr.find(p => p.id === connId)?.stack) ?? 0}</>
-                    )}
-                  </div>
-                  {roomState.status === 'waiting' && <p>La donne n'a pas démarré.</p>}
-                  {roomState.status === 'dealing' && (
-                    <HoldemActions isYourTurn={isYourTurn} playableInfo={playable} onCheck={holdemCheck} onCall={holdemCall} onBet={holdemBet} onRaiseTo={holdemRaiseTo} onFold={holdemFold} roomState={roomState} />
-                  )}
-                  {roomState.status === 'showdown' && <p>Showdown… calcul des mains.</p>}
-                  {roomState.status === 'finished' && <p>Donne terminée.</p>}
-                </div>
+                <HoldemGamePanel
+                  roomState={roomState}
+                  isYourTurn={isYourTurn}
+                  hand={hand}
+                  playable={playable}
+                  holdemEval={holdemEval}
+                  connId={connId}
+                  playersArr={playersArr}
+                  holdemCheck={holdemCheck}
+                  holdemCall={holdemCall}
+                  holdemBet={holdemBet}
+                  holdemRaiseTo={holdemRaiseTo}
+                  holdemFold={holdemFold}
+                />
               )}
               {/* DnD 5e */}
               {roomState.game === 'dnd5e' && (
-                <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                  <h3>DnD 5e — Arène</h3>
-                  {/* Debug temporaire */}
-                    <pre style={{background:'#eee',fontSize:12,padding:4, color:'#111'}}>
-                      connId: {JSON.stringify(connId)}<br />
-                      {/*players: {JSON.stringify(roomState.players, null, 2)}<br />*/}
-                      gold (state): {gold}
-                    </pre>
-                  {/* Affichage or et conversion */}
-                  <div style={{marginBottom:8}}>
-                    <b>Or :</b> {gold} &nbsp;|&nbsp; <b>Jetons :</b> {jetons}
-                    <button style={{marginLeft:12}} onClick={() => convertGoldToJeton(1)} disabled={gold < 10}>Convertir 10 or → 1 jeton</button>
-                  </div>
-                  {conversionMsg && <div style={{color: conversionMsg.startsWith('Conversion') ? 'green' : 'red', marginBottom:8}}>{conversionMsg}</div>}
-                  {/* Affichage de l'état du combat ou de la configuration des monstres */}
-                  {roomState.status === 'waiting' && (
-                    <DnDMonsterSetup send={send} />
-                  )}
-                  {roomState.status === 'fighting' && (
-                    <DnDCombatView roomState={roomState} connId={connId} send={send} />
-                  )}
-                  {roomState.status === 'finished' && (
-                    <div>Combat terminé.</div>
-                  )}
-                </div>
+                <DnDGamePanel
+                  roomState={roomState}
+                  connId={connId}
+                  gold={gold}
+                  jetons={jetons}
+                  conversionMsg={conversionMsg}
+                  convertGoldToJeton={convertGoldToJeton}
+                  send={send}
+                />
               )}
               {/* Placeholder autres jeux */}
               {roomState.game && !['tarot','belote','holdem','dnd5e'].includes(roomState.game) && (
