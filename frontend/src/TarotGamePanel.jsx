@@ -1,16 +1,40 @@
 import React from 'react';
 import CardImage from './components/CardImage'
 
-function TarotGamePanel({ roomState, isYourTurn, hand, playCard, discardSel, toggleDiscard, submitDiscard }) {
+function TarotGamePanel({ roomState, isYourTurn, hand, playCard, discardSel, toggleDiscard, submitDiscard, placeBid }) {
   if (!roomState) return null;
 
   // Affichage des enchères
   if (roomState.status === 'bidding') {
+    // Liste des enchères possibles (adapter selon la logique backend)
+    const bids = [
+      { label: 'Passer', value: 'pass' },
+      { label: 'Petite', value: 'petite' },
+      { label: 'Garde', value: 'garde' },
+      { label: 'Garde sans', value: 'garde_sans' },
+      { label: 'Garde contre', value: 'garde_contre' }
+    ];
+
+    // Utilisation de la prop placeBid pour envoyer l'enchère
+    const sendBid = (bid) => {
+      if (placeBid) {
+        placeBid(bid);
+      } else {
+        console.log('Envoi enchère:', bid);
+      }
+    };
+
     return (
       <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
         <h3>Enchères</h3>
         <p>{isYourTurn ? 'À vous de parler.' : 'En attente...'}</p>
-        {/* Ajoutez ici les boutons d'enchères selon la logique de votre application */}
+        {isYourTurn && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {bids.map(b => (
+              <button key={b.value} onClick={() => sendBid(b.value)}>{b.label}</button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
