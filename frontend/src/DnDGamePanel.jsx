@@ -1,6 +1,6 @@
 import React from 'react';
-import DnDMonsterSetup from './components/DnDMonsterSetup';
-import DnDCombatView from './components/DnDCombatView';
+import DnDMonsterSetup from './gameplay/DnDMonsterSetup';
+import DnDCombatView from './gameplay/DnDCombatView';
 
 function DnDGamePanel({ roomState, connId, gold, jetons, conversionMsg, convertGoldToJeton, send }) {
   if (!roomState) return null;

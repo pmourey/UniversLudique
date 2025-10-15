@@ -1,6 +1,7 @@
 import React from 'react';
+import CardImage from './components/CardImage'
 
-function TarotGamePanel({ roomState, isYourTurn, hand, placeBid, playCard, discardSel, toggleDiscard, submitDiscard }) {
+function TarotGamePanel({ roomState, isYourTurn, hand, playCard, discardSel, toggleDiscard, submitDiscard }) {
   if (!roomState) return null;
 
   // Affichage des enchères
@@ -22,9 +23,13 @@ function TarotGamePanel({ roomState, isYourTurn, hand, placeBid, playCard, disca
         {/* Affichage de la main et sélection des cartes à écarter */}
         <div>
           {hand.map(card => (
-            <button key={card} onClick={() => toggleDiscard(card)} style={{ margin: 2, background: discardSel.includes(card) ? '#ffd' : '#fff' }}>
-              {card}
-            </button>
+            <CardImage
+              key={card}
+              card={card}
+              onClick={() => toggleDiscard(card)}
+              className="card"
+              style={{ margin: 4, border: discardSel.includes(card) ? '2px solid #f90' : '2px solid transparent', borderRadius: 6 }}
+            />
           ))}
         </div>
         <button onClick={submitDiscard} disabled={discardSel.length !== (roomState.players?.length === 5 ? 3 : 6)}>
@@ -42,9 +47,7 @@ function TarotGamePanel({ roomState, isYourTurn, hand, placeBid, playCard, disca
         {/* Affichage de la main et des cartes jouables */}
         <div>
           {hand.map(card => (
-            <button key={card} onClick={() => playCard(card)} style={{ margin: 2 }}>
-              {card}
-            </button>
+            <CardImage key={card} card={card} onClick={() => playCard(card)} className="card" style={{ margin: 4 }} />
           ))}
         </div>
       </div>
@@ -55,4 +58,3 @@ function TarotGamePanel({ roomState, isYourTurn, hand, placeBid, playCard, disca
 }
 
 export default TarotGamePanel;
-

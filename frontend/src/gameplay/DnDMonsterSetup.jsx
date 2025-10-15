@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react'
 
 function DnDMonsterSetup({ send }) {
-  const [monsters, setMonsters] = React.useState([
+  const [monsters, setMonsters] = useState([
     { name: 'Gobelin', hp: 8, max_hp: 8, dmg: 3, ac: 13, cr: 1, dex: 14 },
     { name: 'Orc', hp: 15, max_hp: 15, dmg: 5, ac: 13, cr: 2, dex: 12 },
   ]);
@@ -51,5 +51,5 @@ function DnDMonsterSetup({ send }) {
   );
 }
 
-export default DnDMonsterSetup;
+export default DnDMonsterSetup
 

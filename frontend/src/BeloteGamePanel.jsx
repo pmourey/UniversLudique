@@ -1,7 +1,12 @@
 import React from 'react';
+import CardImage from './components/CardImage'
+import { suitToSymbol } from './utils/suitSymbols'
 
 function BeloteGamePanel({ roomState, isYourTurn, hand, playable, playCard, chooseTrump }) {
   if (!roomState) return null;
+
+  const trump = roomState.trumpSuit
+  const trumpInfo = suitToSymbol(trump)
 
   // Choix de l'atout
   if (roomState.status === 'choosing_trump') {
@@ -22,13 +27,13 @@ function BeloteGamePanel({ roomState, isYourTurn, hand, playable, playCard, choo
   if (roomState.status === 'playing') {
     return (
       <div style={{ borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-        <h3>Jeu des cartes (Belote) — Atout: {roomState.trumpSuit || '—'}</h3>
+        <h3>Jeu des cartes (Belote) — Atout: <span role="img" title={`Atout : ${trumpInfo.label}`} aria-label={`Atout : ${trumpInfo.label}`} style={{color: trumpInfo.color}}>{trumpInfo.symbol}</span></h3>
         <p>{isYourTurn ? 'À vous de jouer' : 'En attente...'}</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {hand.map((c) => {
             const canPlay = !isYourTurn ? false : (playable.length === 0 || playable.includes(c));
             return (
-              <button key={c} onClick={() => isYourTurn && canPlay && playCard(c)} disabled={!canPlay}>{c}</button>
+              <CardImage key={c} card={c} onClick={() => isYourTurn && canPlay && playCard(c)} className="card" style={{ opacity: canPlay ? 1 : 0.45 }} />
             );
           })}
         </div>
@@ -45,4 +50,3 @@ function BeloteGamePanel({ roomState, isYourTurn, hand, playable, playCard, choo
 }
 
 export default BeloteGamePanel;
-

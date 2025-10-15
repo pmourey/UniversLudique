@@ -1,19 +1,23 @@
-import React from 'react';
+import React from 'react'
 
 function DnDCombatView({ roomState, connId, send }) {
   const { players = [], monsters = [], initiative = [], turn, log = [] } = roomState;
   const myPlayer = players.find(p => p.id === connId);
   const isMyTurn = turn === connId && myPlayer && myPlayer.status === 'OK';
   const canAttack = isMyTurn;
+  // Ajout : conditions pour boire une potion
+  // Le bouton ne s'affiche que si c'est le tour du joueur connecté
   const canDrinkPotion = myPlayer && isMyTurn && myPlayer.potions > 0 && myPlayer.hp < myPlayer.max_hp && myPlayer.hp <= 0.5 * myPlayer.max_hp;
   const handleAttack = (targetId) => {
     send('action', { action: 'attack', params: { attacker: connId, target: targetId } });
   };
+  // Ajout : handler pour boire une potion
   const handleDrinkPotion = () => {
     send('action', { action: 'drink_potion' });
   };
   return (
     <div>
+      {/* Inventaire du joueur connecté */}
       {myPlayer && (
         <div style={{ marginBottom: 8 }}>
           <b>{myPlayer.name}</b> — Niveau: {myPlayer.level ?? 1} — Or : {myPlayer.gold ?? 0} — Potions : {myPlayer.potions ?? 0}
@@ -28,6 +32,7 @@ function DnDCombatView({ roomState, connId, send }) {
           <ul>
             {players.map(p => (
               <li key={p.id} style={{ color: p.status === 'Dead' ? 'red' : undefined }}>
+                {/* Affichage du pseudo uniquement dans la vue DnD */}
                 {p.name} (HP: {p.hp}/{p.max_hp}, Dégâts: {p.dmg}, AC: {p.ac}, Dex: {p.dex}) {p.status === 'Dead' && '💀'}
                 {turn === p.id && <b> ← Tour</b>}
               </li>
@@ -75,5 +80,5 @@ function DnDCombatView({ roomState, connId, send }) {
   );
 }
 
-export default DnDCombatView;
+export default DnDCombatView
 

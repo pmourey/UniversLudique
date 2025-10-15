@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import './App.css'
 import TarotGamePanel from './TarotGamePanel'
 import BeloteGamePanel from './BeloteGamePanel'
 import HoldemGamePanel from './HoldemGamePanel'
 import DnDGamePanel from './DnDGamePanel'
+import { suitToSymbol } from './utils/suitSymbols'
 
 const DEFAULT_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
 const WS_URL = DEFAULT_WS
@@ -32,7 +33,6 @@ function App() {
   // Jeu
   const [hand, setHand] = useState([])
   const [isYourTurn, setIsYourTurn] = useState(false)
-  const [youAreTaker, setYouAreTaker] = useState(false)
   const [discardSel, setDiscardSel] = useState([])
   const [playable, setPlayable] = useState([]) // nouvelles cartes jouables (Belote)
 
@@ -131,12 +131,12 @@ function App() {
   const loadJetonsFor = (name) => {
     if (!name) return 0;
     // Ne charger que si le pseudo ressemble à un pseudo valide (évite les clés partielles)
-    const safe = /^[A-Za-z0-9_\-]{3,40}$/.test(name);
+    const safe = /^[A-Za-z0-9_-]{3,40}$/.test(name);
     if (!safe) return 0;
     const v = localStorage.getItem(LS_JETONS_PREFIX + name);
     return v ? Number(v) : 0;
   };
-  const saveJetonsFor = (name, val) => {
+  const saveJetonsFor = useCallback((name, val) => {
     if (!name) return;
     // N'écrire en localStorage que pour un pseudo confirmé :
     // - soit il correspond à registeredName (nom effectivement enregistré durant la session)
@@ -144,7 +144,7 @@ function App() {
     const confirmed = registeredName || localStorage.getItem(LS_REGISTERED) || null;
     if (!confirmed || name !== confirmed) return;
     // Valider le format du pseudo avant d'écrire (empêche les clés partielles)
-    const safe = /^[A-Za-z0-9_\-]{3,40}$/.test(name);
+    const safe = /^[A-Za-z0-9_-]{3,40}$/.test(name);
     if (!safe) return;
     try {
       localStorage.setItem(LS_JETONS_PREFIX + name, String(val));
@@ -152,7 +152,7 @@ function App() {
       // Si le stockage échoue (quota ou autre), ne pas interrompre l'app
       console.warn('Failed to save jetons to localStorage', e);
     }
-  };
+  }, [registeredName]);
 
   // Restaurer les jetons au démarrage : prefère registeredName, puis name (champ de saisie), puis 0
   useEffect(() => {
@@ -180,7 +180,7 @@ function App() {
     // N'écrire dans localStorage que pour un pseudo confirmé (registeredName).
     // Evite de créer des clés temporaires pendant la frappe du pseudo.
     if (registeredName) saveJetonsFor(registeredName, jetons);
-  }, [jetons, registeredName, name]);
+  }, [jetons, registeredName, name, saveJetonsFor]);
 
   // Persister juste avant refresh/fermeture (sauvegarde finale)
   useEffect(() => {
@@ -190,7 +190,7 @@ function App() {
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
-  }, [jetons, registeredName, name]);
+  }, [jetons, registeredName, name, saveJetonsFor]);
 
   // Restaurer les jetons stockés localement quand on a déjà un pseudo enregistré
   useEffect(() => {
@@ -294,7 +294,6 @@ function App() {
       case 'your_hand':
         setHand(msg.payload?.hand || [])
         setIsYourTurn(!!msg.payload?.isYourTurn)
-        setYouAreTaker(!!msg.payload?.youAreTaker)
         setPlayable(msg.payload?.playable || msg.payload?.allowed || [])
         break
       case 'conversion_gold':
@@ -413,6 +412,10 @@ function App() {
 
   // Bouton "Terminer la donne" : actif si tous les joueurs n'ont plus de cartes en main (pour Tarot/Belote)
   const canForceFinish = roomState?.status === 'playing' && (roomState?.players || []).length > 0 && (roomState.players || []).every(p => p.handCount === 0)
+
+  // Informations sur l'atout (pour affichage coloré dans l'entête)
+  // Calculer une fois via useMemo pour éviter plusieurs appels et permettre un style cohérent
+  const trumpInfo = useMemo(() => suitToSymbol(roomState?.trumpSuit), [roomState?.trumpSuit])
 
   // Persistance localStorage : nom, nom enregistré, salon courant
   useEffect(() => { localStorage.setItem(LS_NAME, name) }, [name])
@@ -564,7 +567,7 @@ function App() {
             <button onClick={leaveRoom} style={{marginBottom: 12}}>Quitter le salon</button>
             {/* Le bouton Quitter est affiché pour tous les jeux */}
             <div>
-              <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'} {roomState.game === 'belote' && roomState.trumpSuit ? `— Atout: ${roomState.trumpSuit}` : ''}</p>
+              <p>Salon: <b>{roomState.roomId}</b> — Jeu: <b>{roomState.game || 'tarot'}</b> — Statut: <b>{roomState.status}</b> — Donneur: {roomState.dealerId ?? '—'} {roomState.game === 'belote' && roomState.trumpSuit ? <span>— Atout: <span className="trump-badge" role="img" title={`Atout : ${trumpInfo.label}`} aria-label={`Atout : ${trumpInfo.label}`} style={{color: trumpInfo.color}}>{trumpInfo.symbol}</span></span> : ''}</p>
               <p>Joueurs (ordre):</p>
               <ul>
                 {(roomState.players || []).map(p => (
@@ -692,168 +695,6 @@ function App() {
   )
 }
 
-// Composant d’actions Hold’em
-function HoldemActions({ isYourTurn, playableInfo, onCheck, onCall, onBet, onRaiseTo, onFold, roomState }) {
-  const [betAmt, setBetAmt] = useState('')
-  const [raiseTo, setRaiseTo] = useState('')
-  const allowed = (isYourTurn && playableInfo && typeof playableInfo === 'object' && (playableInfo.fold !== undefined || playableInfo.check !== undefined)) ? playableInfo : null
-  const currentBet = roomState?.currentBet || 0
-
-  return (
-    <div style={{ borderTop: '1px dashed #ddd', paddingTop: 8 }}>
-      <p>{isYourTurn ? 'À vous de parler' : 'En attente...'}</p>
-      {isYourTurn && allowed && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {allowed.fold && <button onClick={onFold}>Fold</button>}
-          {allowed.check && <button onClick={onCheck}>Check</button>}
-          {allowed.call > 0 && <button onClick={onCall}>Call {allowed.call}</button>}
-          {currentBet === 0 ? (
-            <>
-              <input type="number" min={allowed.minBet || 0} placeholder={`Bet ≥ ${allowed.minBet || 0}`} value={betAmt} onChange={e => setBetAmt(e.target.value)} style={{ width: 120 }} />
-              <button onClick={() => onBet(Math.max(parseInt(betAmt||'0',10), allowed.minBet || 0))} disabled={!betAmt}>Bet</button>
-            </>
-          ) : (
-            <>
-              <input type="number" min={allowed.minRaiseTo || 0} placeholder={`Raise to ≥ ${allowed.minRaiseTo || 0}`} value={raiseTo} onChange={e => setRaiseTo(e.target.value)} style={{ width: 160 }} />
-              <button onClick={() => onRaiseTo(Math.max(parseInt(raiseTo||'0',10), allowed.minRaiseTo || 0))} disabled={!raiseTo}>Raise To</button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Composant de configuration des monstres pour DnD
-function DnDMonsterSetup({ send }) {
-  const [monsters, setMonsters] = useState([
-    { name: 'Gobelin', hp: 8, max_hp: 8, dmg: 3, ac: 13, cr: 1, dex: 14 },
-    { name: 'Orc', hp: 15, max_hp: 15, dmg: 5, ac: 13, cr: 2, dex: 12 },
-  ]);
-  const handleChange = (i, field, value) => {
-    setMonsters(m => m.map((mon, idx) => idx === i ? { ...mon, [field]: value } : mon));
-  };
-  const addMonster = () => setMonsters(m => [...m, { name: '', hp: 10, max_hp: 10, dmg: 2, ac: 10, cr: 1, dex: 10 }]);
-  const removeMonster = (i) => setMonsters(m => m.filter((_, idx) => idx !== i));
-  const submit = () => {
-    send('action', { action: 'set_monsters', params: { monsters } });
-    send('action', { action: 'start_combat' });
-  };
-  return (
-    <div>
-      <h4>Configuration des monstres</h4>
-      <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-        <thead>
-          <tr>
-            <th style={{ width: 80, textAlign: 'left', padding: 2 }}>Nom</th>
-            <th style={{ width: 50, textAlign: 'left', padding: 2 }}>HP</th>
-            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Max HP</th>
-            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Dégâts</th>
-            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>AC</th>
-            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>CR</th>
-            <th style={{ width: 40, textAlign: 'left', padding: 2 }}>Dex</th>
-            <th style={{ width: 60, textAlign: 'left', padding: 2 }}>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {monsters.map((m, i) => (
-            <tr key={i}>
-              <td style={{ padding: 2 }}><input value={m.name} onChange={e => handleChange(i, 'name', e.target.value)} placeholder="Nom" style={{ width: 70 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.hp} onChange={e => handleChange(i, 'hp', +e.target.value)} placeholder="HP" style={{ width: 40 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.max_hp} onChange={e => handleChange(i, 'max_hp', +e.target.value)} placeholder="Max HP" style={{ width: 50 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.dmg} onChange={e => handleChange(i, 'dmg', +e.target.value)} placeholder="Dégâts" style={{ width: 50 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.ac} onChange={e => handleChange(i, 'ac', +e.target.value)} placeholder="AC" style={{ width: 30 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.cr} onChange={e => handleChange(i, 'cr', +e.target.value)} placeholder="CR" style={{ width: 30 }} /></td>
-              <td style={{ padding: 2 }}><input type="number" value={m.dex} onChange={e => handleChange(i, 'dex', +e.target.value)} placeholder="Dex" style={{ width: 30 }} /></td>
-              <td style={{ padding: 2 }}><button onClick={() => removeMonster(i)} disabled={monsters.length <= 1}>Suppr</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button onClick={addMonster}>Ajouter un monstre</button>
-      <button onClick={submit} style={{ marginLeft: 8 }}>Lancer le combat</button>
-    </div>
-  );
-}
-// Composant d'affichage et d'action du combat DnD
-function DnDCombatView({ roomState, connId, send }) {
-  const { players = [], monsters = [], initiative = [], turn, log = [] } = roomState;
-  const myPlayer = players.find(p => p.id === connId);
-  const isMyTurn = turn === connId && myPlayer && myPlayer.status === 'OK';
-  const canAttack = isMyTurn;
-  // Ajout : conditions pour boire une potion
-  // Le bouton ne s'affiche que si c'est le tour du joueur connecté
-  const canDrinkPotion = myPlayer && isMyTurn && myPlayer.potions > 0 && myPlayer.hp < myPlayer.max_hp && myPlayer.hp <= 0.5 * myPlayer.max_hp;
-  const handleAttack = (targetId) => {
-    send('action', { action: 'attack', params: { attacker: connId, target: targetId } });
-  };
-  // Ajout : handler pour boire une potion
-  const handleDrinkPotion = () => {
-    send('action', { action: 'drink_potion' });
-  };
-  return (
-    <div>
-      {/* Inventaire du joueur connecté */}
-      {myPlayer && (
-        <div style={{ marginBottom: 8 }}>
-          <b>{myPlayer.name}</b> — Niveau: {myPlayer.level ?? 1} — Or : {myPlayer.gold ?? 0} — Potions : {myPlayer.potions ?? 0}
-          {canDrinkPotion && (
-            <button style={{ marginLeft: 12 }} onClick={handleDrinkPotion}>Boire Potion (+10 PV)</button>
-          )}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 32 }}>
-        <div>
-          <b>Aventuriers</b>
-          <ul>
-            {players.map(p => (
-              <li key={p.id} style={{ color: p.status === 'Dead' ? 'red' : undefined }}>
-                {/* Affichage du pseudo uniquement dans la vue DnD */}
-                {p.name} (HP: {p.hp}/{p.max_hp}, Dégâts: {p.dmg}, AC: {p.ac}, Dex: {p.dex}) {p.status === 'Dead' && '💀'}
-                {turn === p.id && <b> ← Tour</b>}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <b>Monstres</b>
-          <ul>
-            {monsters.map(m => (
-              <li key={m.id} style={{ color: m.status === 'Dead' ? 'red' : undefined }}>
-                {m.name} (HP: {m.hp}/{m.max_hp}, Dégâts: {m.dmg}, AC: {m.ac}, Dex: {m.dex}, CR: {m.cr}) {m.status === 'Dead' && '💀'}
-                {canAttack && m.status === 'OK' && (
-                  <button onClick={() => handleAttack(m.id)} style={{ marginLeft: 8 }}>Attaquer</button>
-                )}
-                {turn === m.id && <b> ← Tour</b>}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <b>Initiative</b>
-          <ol>
-            {initiative.map((e, i) => (
-              <li key={i} style={{ fontWeight: turn === e.id ? 'bold' : undefined }}>
-                {e.type === 'player'
-                  ? (players.find(p => p.id === e.id)?.name || e.id)
-                  : (monsters.find(m => m.id === e.id)?.name || e.id)
-                }
-                {turn === e.id && ' ← Tour'}
-              </li>
-            ))}
-          </ol>
-        </div>
-      </div>
-      <div style={{ marginTop: 12 }}>
-        <b>Log du combat :</b>
-        <ul style={{ maxHeight: 120, overflow: 'auto', background: '#f9f9f9', padding: 8, borderRadius: 4, color: '#222' }}>
-          {log.map((l, i) => (
-            <li key={i}><b>{l[0]}</b>: {l[1]}</li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
 export default App
+
+// Les composants HoldemActions, DnDMonsterSetup et DnDCombatView ont été déplacés vers frontend/src/gameplay/
