@@ -31,7 +31,7 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ''),
         configure: (proxy) => {
-          proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
+          proxy.on('proxyReqWs', (proxyReq, req) => {
             // Ajoute l'IP réelle du client dans le header X-Forwarded-For
             if (req.socket && req.socket.remoteAddress) {
               proxyReq.setHeader('X-Forwarded-For', req.socket.remoteAddress);
