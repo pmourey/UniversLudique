@@ -40,3 +40,24 @@
 .read-the-docs {
   color: #888;
 }
+
+.trump-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.95); /* fond clair pour contraste */
+  color: inherit;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  margin-left: 6px;
+  line-height: 1;
+}
+
+/* Variante plus discrète si tu préfères un fond semi-transparent */
+.trump-badge--subtle {
+  background: rgba(255,255,255,0.85);
+}
