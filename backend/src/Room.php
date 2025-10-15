@@ -38,11 +38,32 @@ class Room
 
     public function add(ConnectionInterface $conn, $name)
     {
-//        if (!$name) {
-//            throw new \InvalidArgumentException('Un pseudo est requis pour rejoindre la partie.');
-//        }
+        // Vérification de l'utilisation des jetons pour tous les jeux sauf DnD
+        if (!(get_class($this) === 'Tarot\\DnDRoom' || $this instanceof DnDRoom)) {
+            // Vérifie que le joueur a au moins 1 jeton
+            if (PlayerWallet::getJetons($name) < 1) {
+                // On peut envoyer un message d'erreur au client si besoin
+                if (method_exists($conn, 'send')) {
+                    $conn->send(json_encode([
+                        'type' => 'error',
+                        'message' => 'Vous n\'avez pas assez de jetons pour rejoindre ce salon.'
+                    ]));
+                }
+                // Envoie le solde de jetons même en cas d'échec
+                PlayerWallet::sendJetonsToPlayer($conn, $name);
+                return false;
+            }
+            // Débite 1 jeton
+            PlayerWallet::removeJetons($name, 1);
+            // Synchroniser la clé resourceId avec la clé pseudo après débit pour éviter
+            // qu'une valeur obsolète stockée sous resourceId restaure le solde côté pseudo
+            $rid = isset($conn->resourceId) ? $conn->resourceId : null;
+            PlayerWallet::setJetons($rid, PlayerWallet::getJetons($name));
+            // Envoie le solde de jetons après débit
+            PlayerWallet::sendJetonsToPlayer($conn, $name);
+        }
         $info = array(
-            'id' => $conn->resourceId,
+            'id' => isset($conn->resourceId) ? $conn->resourceId : null,
             'name' => (string)$name,
             'seat' => count($this->seats),
         );
@@ -61,6 +82,19 @@ class Room
     {
         if (isset($this->players[$conn])) {
             $info = $this->players[$conn];
+            // Synchroniser le wallet resourceId avec le solde actuel du pseudo
+            // afin d'éviter qu'une valeur obsolète (sous resourceId) ressuscite
+            // le solde côté pseudo lors d'un futur join sans refresh.
+            try {
+                $rid = $info['id'];
+                $name = $info['name'] ?? null;
+                if ($name !== null) {
+                    $jetons = PlayerWallet::getJetons($name);
+                    PlayerWallet::setJetons($rid, $jetons);
+                }
+            } catch (\Throwable $e) {
+                // Ne pas interrompre la suppression en cas d'erreur de sync
+            }
             unset($this->players[$conn]);
             // remove seat/order entry
             $this->seats = array_values(array_filter($this->seats, function($p) use ($info){ return $p['id'] !== $info['id']; }));
@@ -152,7 +186,7 @@ class Room
 
     public function handleAction(ConnectionInterface $from, $action, array $params = array())
     {
-        $pid = $from->resourceId;
+        $pid = isset($from->resourceId) ? $from->resourceId : null;
         switch ($action) {
             case 'ping':
                 $this->broadcast(array( 'type' => 'pong', 'payload' => array( 'from' => $pid, 'ts' => time() ) ));

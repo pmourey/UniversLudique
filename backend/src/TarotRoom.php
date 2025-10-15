@@ -43,9 +43,30 @@ class TarotRoom implements GameRoom
 
     public function add(ConnectionInterface $conn, $name)
     {
-        if (!$name) {
-            throw new \InvalidArgumentException('Un pseudo est requis pour rejoindre la partie.');
+        // Vérification de l'utilisation des jetons pour tous les jeux sauf DnD
+        if (!(get_class($this) === 'Tarot\\DnDRoom' || $this instanceof DnDRoom)) {
+            if (!isset($name) || $name === '') {
+                throw new \InvalidArgumentException('Un pseudo est requis pour rejoindre la partie.');
+            }
+            // Vérifie que le joueur a au moins 1 jeton
+            if (PlayerWallet::getJetons($name) < 1) {
+                if (method_exists($conn, 'send')) {
+                    $conn->send(json_encode([
+                        'type' => 'error',
+                        'message' => 'Vous n\'avez pas assez de jetons pour rejoindre ce salon.'
+                    ]));
+                }
+                PlayerWallet::sendJetonsToPlayer($conn, $name);
+                return false;
+            }
+            // Débite 1 jeton
+            PlayerWallet::removeJetons($name, 1);
+            // Synchroniser la clé resourceId avec la clé pseudo après débit
+            $rid = isset($conn->resourceId) ? $conn->resourceId : null;
+            PlayerWallet::setJetons($rid, PlayerWallet::getJetons($name));
+            PlayerWallet::sendJetonsToPlayer($conn, $name);
         }
+
         $info = array(
             'id' => $conn->resourceId,
             'name' => (string)$name,

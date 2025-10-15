@@ -97,7 +97,18 @@ class GameServer implements MessageComponentInterface
                     }
                     $client['name'] = $name;
                     $this->clients[$from] = $client; // persist change
-                    $this->send($from, [ 'type' => 'registered', 'payload' => [ 'name' => $name ] ]);
+
+                    // Si le client envoie un solde de jetons local, l'initialiser côté serveur
+                    if (isset($payload['jetons']) && is_numeric($payload['jetons'])) {
+                        $val = (int)$payload['jetons'];
+                        // Stocker le solde à la fois sous le pseudo et sous l'ID de connexion
+                        PlayerWallet::setJetons($name, $val);
+                        PlayerWallet::setJetons($from->resourceId, $val);
+                    }
+
+                    // Renvoyer également le solde connu côté serveur afin que le client soit synchronisé (par pseudo)
+                    $serverJetons = PlayerWallet::getJetons($name);
+                    $this->send($from, [ 'type' => 'registered', 'payload' => [ 'name' => $name, 'jetons' => $serverJetons ] ]);
                     break;
 
                 case 'unregister':
@@ -129,6 +140,25 @@ class GameServer implements MessageComponentInterface
                     }
                     $room = $this->rooms[$roomId];
                     $playerName = $client['name'];
+
+                    // --- Synchronisation des jetons entre resourceId et pseudo ---
+                    $rid = $from->resourceId;
+                    // Valeurs actuelles
+                    $jetonsByName = PlayerWallet::getJetons($playerName);
+                    $jetonsByRid = PlayerWallet::getJetons($rid);
+                    // Si une clé a la valeur et l'autre non, copier pour garantir cohérence
+                    if ($jetonsByName <= 0 && $jetonsByRid > 0) {
+                        PlayerWallet::setJetons($playerName, $jetonsByRid);
+                        // Envoyer la MAJ au client (clef pseudo) pour que le frontend sauvegarde en localStorage
+                        PlayerWallet::sendJetonsToPlayer($from, $playerName);
+                        $jetonsByName = $jetonsByRid;
+                    } elseif ($jetonsByRid <= 0 && $jetonsByName > 0) {
+                        PlayerWallet::setJetons($rid, $jetonsByName);
+                        PlayerWallet::sendJetonsToPlayer($from, $playerName);
+                        $jetonsByRid = $jetonsByName;
+                    }
+                    // --- Fin sync ---
+
                     // Récupérer le type de jeu du salon cible
                     $targetGameType = method_exists($room, 'getGameType') ? $room->getGameType() : null;
                     // Vérifier si le joueur est déjà inscrit dans un autre salon du même type de jeu
@@ -230,6 +260,23 @@ class GameServer implements MessageComponentInterface
                         'type' => 'rooms',
                         'payload' => array_values($summaries)
                     ]);
+                    break;
+
+                case 'sync_jetons':
+                    $val = isset($payload['jetons']) && is_numeric($payload['jetons']) ? (int)$payload['jetons'] : 0;
+                    $name = $client['name'] ?? null;
+                    if ($name) {
+                        PlayerWallet::setJetons($name, $val);
+                        PlayerWallet::setJetons($from->resourceId, $val);
+                        // Envoyer la mise à jour au client
+                        PlayerWallet::sendJetonsToPlayer($from, $name);
+                        $this->send($from, [ 'type' => 'registered', 'payload' => [ 'name' => $name, 'jetons' => PlayerWallet::getJetons($name) ] ]);
+                    } else {
+                        // Si pas de pseudo enregistré, renseigner uniquement par resourceId
+                        PlayerWallet::setJetons($from->resourceId, $val);
+                        PlayerWallet::sendJetonsToPlayer($from, $from->resourceId);
+                        $this->send($from, [ 'type' => 'registered', 'payload' => [ 'name' => null, 'jetons' => PlayerWallet::getJetons($from->resourceId) ] ]);
+                    }
                     break;
 
                 default:

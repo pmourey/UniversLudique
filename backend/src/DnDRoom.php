@@ -3,6 +3,7 @@ namespace Tarot;
 
 require_once __DIR__ . '/Room.php';
 require_once __DIR__ . '/GameRoom.php';
+require_once __DIR__ . '/PlayerWallet.php';
 
 use Ratchet\ConnectionInterface;
 
@@ -43,6 +44,8 @@ class DnDRoom extends Room implements GameRoom {
         $player['gold'] = 0; // Ajout or
         $player['potions'] = 0; // Ajout potions
         $this->dndPlayers[$player['id']] = $player;
+        // Synchronisation de l'or dès la création du joueur
+        \Tarot\PlayerWallet::setGold($player['id'], $player['gold']);
     }
 
     public function setMonsters($monsters) {
@@ -277,6 +280,45 @@ class DnDRoom extends Room implements GameRoom {
                 }
                 $this->broadcast(['type' => 'state', 'payload' => $this->serializeState()]);
                 break;
+            case 'convert_gold': {
+                $playerId = $from->resourceId ?? (isset($from->{'resourceId'}) ? $from->{'resourceId'} : $from);
+                $jetonsDemandes = isset($params['jetons']) ? (int)$params['jetons'] : 1;
+                if ($jetonsDemandes < 1) $jetonsDemandes = 1;
+                // Log diagnostic
+                echo "[DnDRoom] convert_gold requested by playerId={$playerId}, jetons={$jetonsDemandes}\n";
+                echo "[DnDRoom] PlayerWallet reported gold=" . PlayerWallet::getGold($playerId) . " before conversion\n";
+                $success = PlayerWallet::convertGoldToJetons($playerId, $jetonsDemandes);
+                if ($success) {
+                    // Synchroniser le solde de jetons sur la clé du pseudo si disponible
+                    $newJetons = PlayerWallet::getJetons($playerId);
+                    if (isset($this->dndPlayers[$playerId]) && isset($this->dndPlayers[$playerId]['name'])) {
+                        $playerName = $this->dndPlayers[$playerId]['name'];
+                        PlayerWallet::setJetons($playerName, $newJetons);
+                        // Envoyer la mise à jour des jetons au joueur (clé: pseudo)
+                        PlayerWallet::sendJetonsToPlayer($from, $playerName);
+                    } else {
+                        // Envoyer la mise à jour directement par resourceId
+                        PlayerWallet::sendJetonsToPlayer($from, $playerId);
+                    }
+                    // Envoie le nouveau solde de jetons et d'or
+                    if (method_exists($from, 'send')) {
+                        $from->send(json_encode([
+                            'type' => 'conversion_gold',
+                            'jetons' => $newJetons,
+                            'gold' => PlayerWallet::getGold($playerId),
+                            'converted' => $jetonsDemandes
+                        ]));
+                    }
+                } else {
+                    if (method_exists($from, 'send')) {
+                        $from->send(json_encode([
+                            'type' => 'error',
+                            'message' => "Pas assez d'or pour convertir en jeton (50 or = 1 jeton)"
+                        ]));
+                    }
+                }
+                break;
+            }
             default:
                 // action inconnue
                 break;
@@ -284,7 +326,18 @@ class DnDRoom extends Room implements GameRoom {
     }
 
     public function getState() {
-        // Correction : extraire les infos des joueurs depuis le SplObjectStorage
+        // Synchroniser l'or de chaque joueur avec PlayerWallet
+        foreach ($this->dndPlayers as &$player) {
+            if (isset($player['id'])) {
+                $player['gold'] = PlayerWallet::getGold($player['id']);
+            }
+        }
+        // Debug: log current wallet snapshot for players
+        $ids = array_map(function($p){ return $p['id']; }, array_values($this->dndPlayers));
+        foreach ($ids as $id) {
+            echo "[DnDRoom] getState sync: playerId={$id} wallet=" . PlayerWallet::getGold($id) . "\n";
+        }
+        unset($player); // Bonnes pratiques pour les références
         $players = array_values($this->dndPlayers);
         return [
             'game' => $this->game,
@@ -367,18 +420,41 @@ class DnDRoom extends Room implements GameRoom {
                 $totalPotions += 1; // 1 potion par monstre tué
             }
         }
-        $alivePlayers = array_filter($this->dndPlayers, function($p) { return $p['status'] === 'OK'; });
-        $n = count($alivePlayers);
-        if ($n > 0) {
-            $goldPerPlayer = intval($totalGold / $n);
-            $potionsPerPlayer = intval($totalPotions / $n);
-            foreach ($alivePlayers as &$p) {
+        // Correction : travailler directement sur $this->dndPlayers par référence
+        foreach ($this->dndPlayers as $id => &$p) {
+            if ($p['status'] === 'OK') {
+                $goldPerPlayer = (count($this->monsters) > 0) ? intval($totalGold / count(array_filter($this->dndPlayers, function($pl) { return $pl['status'] === 'OK'; }))) : 0;
+                $potionsPerPlayer = (count($this->monsters) > 0) ? intval($totalPotions / count(array_filter($this->dndPlayers, function($pl) { return $pl['status'] === 'OK'; }))) : 0;
                 $p['gold'] += $goldPerPlayer;
                 $p['potions'] += $potionsPerPlayer;
+                PlayerWallet::setGold($p['id'], $p['gold']);
             }
         }
+        unset($p);
     }
     public function getGameType() {
         return $this->game;
+    }
+    // Ajoute ou retire de l'or et convertit automatiquement en jetons (50 gold = 1 jeton)
+    public function updateGoldAndConvertToJetons($playerId, $goldDelta) {
+        if (!isset($this->dndPlayers[$playerId])) return;
+        $player = &$this->dndPlayers[$playerId];
+        $player['gold'] += $goldDelta;
+        if ($player['gold'] < 0) $player['gold'] = 0;
+        // Conversion automatique
+        $jetons = intdiv($player['gold'], 50);
+        if ($jetons > 0) {
+            PlayerWallet::addJetons($playerId, $jetons);
+            $player['gold'] -= $jetons * 50;
+        }
+        // Synchronisation centrale
+        PlayerWallet::setGold($playerId, $player['gold']);
+    }
+    // Synchronisation de l'or à chaque modification directe
+    public function setPlayerGold($playerId, $gold) {
+        if (isset($this->dndPlayers[$playerId])) {
+            $this->dndPlayers[$playerId]['gold'] = $gold;
+            PlayerWallet::setGold($playerId, $gold);
+        }
     }
 }

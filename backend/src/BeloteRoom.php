@@ -40,6 +40,30 @@ class BeloteRoom implements GameRoom
 
     public function add(ConnectionInterface $conn, $name)
     {
+        // Vérification de l'utilisation des jetons pour tous les jeux sauf DnD
+        if (!(get_class($this) === 'Tarot\\DnDRoom' || $this instanceof DnDRoom)) {
+            // Vérifie que le joueur a au moins 1 jeton
+            if (PlayerWallet::getJetons($name) < 1) {
+                // On peut envoyer un message d'erreur au client si besoin
+                if (method_exists($conn, 'send')) {
+                    $conn->send(json_encode([
+                        'type' => 'error',
+                        'message' => 'Vous n\'avez pas assez de jetons pour rejoindre ce salon.'
+                    ]));
+                }
+                // Envoie le solde de jetons même en cas d'échec
+                PlayerWallet::sendJetonsToPlayer($conn, $name);
+                return false;
+            }
+            // Débite 1 jeton
+            PlayerWallet::removeJetons($name, 1);
+            // Synchroniser la clé resourceId avec la clé pseudo après débit
+            $rid = isset($conn->resourceId) ? $conn->resourceId : null;
+            PlayerWallet::setJetons($rid, PlayerWallet::getJetons($name));
+            // Envoie le solde de jetons après débit
+            PlayerWallet::sendJetonsToPlayer($conn, $name);
+        }
+
         $info = array(
             'id' => $conn->resourceId,
             'name' => (string)$name,

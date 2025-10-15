@@ -2,6 +2,7 @@
 namespace Tarot;
 
 require_once __DIR__ . '/lib/PokerEvaluator.php';
+require_once __DIR__ . '/PlayerWallet.php';
 
 use Ratchet\ConnectionInterface;
 use SplObjectStorage;
@@ -53,14 +54,22 @@ class HoldemRoom implements GameRoom
 
     public function add(ConnectionInterface $conn, $name)
     {
+        // Utiliser le pseudo comme clé pour le wallet afin d'être cohérent avec Room::add
+        $playerId = $conn->resourceId;
+        $playerName = (string)$name;
+        // Vérifier et consommer 1 jeton (clé: pseudo)
+        if (!\Tarot\PlayerWallet::removeJetons($playerName, 1)) {
+            throw new \RuntimeException("Vous n'avez pas assez de jetons pour rejoindre cette partie.");
+        }
+        // Envoyer le nouveau solde au joueur connecté pour synchroniser le frontend/localStorage
+        PlayerWallet::sendJetonsToPlayer($conn, $playerName);
         $info = array(
-            'id' => $conn->resourceId,
-            'name' => (string)$name,
+            'id' => $playerId,
+            'name' => $playerName,
             'seat' => count($this->seats),
         );
         $this->players[$conn] = $info;
         $this->seats[] = array('id' => $info['id'], 'name' => $info['name']);
-        // Mise initiale à l'arrivée si pas déjà assignée
         if (!isset($this->stacks[$info['id']])) { $this->stacks[$info['id']] = $this->initialStack; }
         $this->rebuildOrder();
         $this->broadcast([ 'type' => 'room_update', 'payload' => $this->serializeState() ]);
@@ -556,6 +565,8 @@ class HoldemRoom implements GameRoom
                 'bet' => $this->betsThisRound[$pid] ?? 0,
                 'folded' => $this->folded[$pid] ?? false,
                 'allin' => $this->allin[$pid] ?? false,
+                // Lire les jetons par pseudo
+                'jetons' => \Tarot\PlayerWallet::getJetons($p['name']),
             ];
         }
         usort($out, function($a,$b){ return ($a['seat'] - $b['seat']); });
